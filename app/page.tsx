@@ -1,65 +1,577 @@
-import Image from "next/image";
+"use client";
+import React, { useState, useEffect } from 'react';
+import { db } from '../firebase'; 
+import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, onSnapshot } from 'firebase/firestore';
 
-export default function Home() {
+function extractVideoId(url: string) {
+  if (!url) return null;
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=)([a-zA-Z0-9_-]{11})/,
+    /(?:youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+    /(?:youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+    /(?:youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
+  ];
+  for (const p of patterns) {
+    const m = url.match(p);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+const TOPICS = ["Economics", "Startups", "Stand-up", "Data", "Finance", "Tech", "Science", "Design", "History", "Fitness", "Philosophy", "Music", "Podcast", "Other"];
+
+export default function CuratdMVP() {
+  const [url, setUrl] = useState('');
+  const [startMin, setStartMin] = useState('');
+  const [startSec, setStartSec] = useState('');
+  const [endMin, setEndMin] = useState('');
+  const [endSec, setEndSec] = useState('');
+  const [note, setNote] = useState('');
+  const [title, setTitle] = useState('');
+  const [channel, setChannel] = useState('');
+  const [topic, setTopic] = useState('Other');
+  const [loading, setLoading] = useState(false);
+  const [clips, setClips] = useState<any[]>([]);
+  const [editingClipId, setEditingClipId] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [activeFilter, setActiveFilter] = useState('All');
+  const [playingClip, setPlayingClip] = useState<string | null>(null);
+
+  useEffect(() => {
+    const q = query(collection(db, "clips"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setClips(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const resetForm = () => {
+    setUrl(''); setStartMin(''); setStartSec(''); setEndMin(''); setEndSec('');
+    setNote(''); setTitle(''); setChannel(''); setTopic('Other');
+    setEditingClipId(null); setShowForm(false);
+  };
+
+  const handleSave = async () => {
+    if (!url) return alert("Please paste a YouTube URL");
+    if (!title) return alert("Please add a title");
+    const totalStart = (parseInt(startMin) || 0) * 60 + (parseInt(startSec) || 0);
+    const totalEnd = (parseInt(endMin) || 0) * 60 + (parseInt(endSec) || 0);
+    const videoId = extractVideoId(url);
+
+    setLoading(true);
+    try {
+      const clipData = {
+        url, videoId, title, channel, topic,
+        startTime: totalStart, endTime: totalEnd,
+        displayStart: `${startMin || 0}:${(startSec || '00').toString().padStart(2, '0')}`,
+        displayEnd: `${endMin || 0}:${(endSec || '00').toString().padStart(2, '0')}`,
+        note,
+      };
+      if (editingClipId) {
+        await updateDoc(doc(db, "clips", editingClipId), clipData);
+      } else {
+        await addDoc(collection(db, "clips"), { ...clipData, createdAt: serverTimestamp() });
+      }
+      resetForm();
+    } catch (e) {
+      alert("Error saving clip.");
+    }
+    setLoading(false);
+  };
+
+  const handleEdit = (clip: any) => {
+    setUrl(clip.url || '');
+    setTitle(clip.title || '');
+    setChannel(clip.channel || '');
+    setTopic(clip.topic || 'Other');
+    setNote(clip.note || '');
+    const sMin = Math.floor((clip.startTime || 0) / 60);
+    const sSec = (clip.startTime || 0) % 60;
+    const eMin = Math.floor((clip.endTime || 0) / 60);
+    const eSec = (clip.endTime || 0) % 60;
+    setStartMin(sMin.toString());
+    setStartSec(sSec.toString());
+    setEndMin(eMin.toString());
+    setEndSec(eSec.toString());
+    setEditingClipId(clip.id);
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDelete = async (clipId: string) => {
+    if (!confirm("Delete this clip?")) return;
+    try { await deleteDoc(doc(db, "clips", clipId)); } catch (e) { alert("Error deleting."); }
+  };
+
+  const formatDuration = (start: number, end: number) => {
+    if (!end) return '';
+    const diff = Math.max(0, end - start);
+    const m = Math.floor(diff / 60);
+    const s = diff % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const usedTopics = [...new Set(clips.map(c => c.topic).filter(Boolean))];
+  const filtered = activeFilter === 'All' ? clips : [];
+  const previewId = extractVideoId(url);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="h-screen bg-black text-white font-sans flex">
+      {/* Left icon sidebar */}
+      <aside className="w-14 border-r border-zinc-800 flex flex-col items-center py-4 gap-3">
+        <button
+          type="button"
+          onClick={() => { setActiveFilter('All'); setPlayingClip(null); }}
+          className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center hover:bg-emerald-500/20 transition-colors"
+          aria-label="CURATD Home"
+          title="Home"
+        >
+          <div className="w-6 h-6 rounded-md bg-emerald-500 flex items-center justify-center">
+            <span className="text-black text-[10px] leading-none">▶</span>
+          </div>
+        </button>
+
+        <div className="flex-1 flex flex-col items-center gap-2 pt-2">
+          <button
+            type="button"
+            onClick={() => setActiveFilter('All')}
+            className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-colors ${
+              activeFilter === 'All'
+                ? 'bg-zinc-900 border-zinc-700 text-white'
+                : 'bg-black border-transparent text-zinc-500 hover:text-white hover:bg-zinc-900/60'
+            }`}
+            aria-label="Home"
+            title="Home"
+          >
+            <span className="text-lg leading-none">⌂</span>
+          </button>
+
+          <button
+            type="button"
+            className="w-10 h-10 rounded-xl flex items-center justify-center bg-black hover:bg-zinc-900/60 transition-colors"
+            aria-label="Profile"
+            title="Profile"
+          >
+            <div className="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center text-black text-xs font-bold">
+              M
+            </div>
+          </button>
+
+          <button
+            type="button"
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900/60 transition-colors"
+            aria-label="Search"
+            title="Search"
+          >
+            <span className="text-lg leading-none">⌕</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => { resetForm(); setShowForm(true); }}
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900/60 transition-colors"
+            aria-label="Add"
+            title="Add"
+          >
+            <span className="text-lg leading-none">＋</span>
+          </button>
+
+          <button
+            type="button"
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900/60 transition-colors"
+            aria-label="Notifications"
+            title="Notifications"
+          >
+            <span className="text-lg leading-none">⦿</span>
+          </button>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </aside>
+
+      {/* Middle sidebar */}
+      <aside className="w-[220px] border-r border-zinc-800 px-5 py-5 overflow-y-auto">
+        <div className="space-y-8">
+          {/* Your Topics */}
+          <section>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white">Your Topics</h3>
+              <button type="button" className="text-xs text-zinc-500 hover:text-white transition-colors">
+                Edit
+              </button>
+            </div>
+            <div className="flex gap-2 flex-wrap mt-3">
+              {usedTopics.length === 0 ? (
+                <span className="text-xs text-zinc-500">No topics yet</span>
+              ) : (
+                usedTopics.map((t) => (
+                  <span
+                    key={t}
+                    className="text-[11px] px-3 py-1 rounded-full bg-black text-zinc-300 border border-zinc-700/70"
+                  >
+                    {t}
+                  </span>
+                ))
+              )}
+            </div>
+          </section>
+
+          {/* Recommended Topics */}
+          <section>
+            <h3 className="text-sm font-semibold text-white">Recommended Topics</h3>
+            <div className="flex gap-2 flex-wrap mt-3">
+              {['Psychology', 'History', 'Science', 'Design', 'Fitness', 'Philosophy'].map((t) => (
+                <span
+                  key={t}
+                  className="text-[11px] px-3 py-1 rounded-full bg-black text-zinc-300 border border-zinc-700/70"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+          </section>
+
+          {/* Who to Follow */}
+          <section>
+            <h3 className="text-sm font-semibold text-white">Who to Follow</h3>
+            <div className="mt-3 space-y-3">
+              {[
+                { initials: 'RD', name: 'Rhea Desai', handle: '@rheadoes', clips: 128, color: 'bg-violet-500/20 text-violet-200 border-violet-500/30' },
+                { initials: 'AK', name: 'Arjun Kulkarni', handle: '@arjunk', clips: 74, color: 'bg-cyan-500/20 text-cyan-200 border-cyan-500/30' },
+                { initials: 'JS', name: 'Jade Stone', handle: '@jadestone', clips: 212, color: 'bg-amber-500/20 text-amber-200 border-amber-500/30' },
+              ].map((u) => (
+                <div key={u.handle} className="flex items-center gap-3">
+                  <div className={`w-9 h-9 rounded-full border flex items-center justify-center text-xs font-bold ${u.color}`}>
+                    {u.initials}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-semibold text-white truncate">{u.name}</div>
+                    <div className="text-[11px] text-zinc-500 truncate">
+                      {u.handle} · {u.clips} clips
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="text-[11px] px-3 py-1.5 rounded-full border border-emerald-500 text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+                  >
+                    Follow
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Top Curators */}
+          <section>
+            <h3 className="text-sm font-semibold text-white">Top Curators This Week</h3>
+            <ol className="mt-3 space-y-2">
+              {[
+                { name: 'Nora', saves: 642 },
+                { name: 'Dev', saves: 511 },
+                { name: 'Sana', saves: 476 },
+              ].map((u, idx) => (
+                <li key={u.name} className="flex items-center justify-between text-xs">
+                  <div className="text-zinc-300">
+                    <span className="text-zinc-500 mr-2">{idx + 1}.</span>
+                    {u.name}
+                  </div>
+                  <div className="text-zinc-500">{u.saves} saves</div>
+                </li>
+              ))}
+            </ol>
+          </section>
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto px-6 py-6">
+          {/* Tabs */}
+          <div className="flex items-center gap-5 border-b border-zinc-800 pb-4">
+            {[
+              { key: 'Following', label: 'Following', value: 'Following' },
+              { key: 'For You', label: 'For You', value: 'All' },
+              { key: 'Topics', label: 'Topics', value: 'Topics' },
+              { key: 'Popular', label: 'Popular', value: 'Popular' },
+            ].map((t) => {
+              const isActive = (t.value === 'All' && activeFilter === 'All') || activeFilter === t.value;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setActiveFilter(t.value)}
+                  className={`text-sm font-semibold transition-colors ${
+                    isActive
+                      ? 'text-emerald-500'
+                      : 'text-zinc-500 hover:text-white'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Feed */}
+          <div className="mt-6 space-y-4 pb-20">
+            {activeFilter !== 'All' ? (
+              <div className="text-zinc-500 text-sm py-16 text-center border border-zinc-800 rounded-2xl bg-zinc-900/20">
+                This tab is a placeholder. Switch to <span className="text-emerald-500 font-semibold">For You</span> to see all clips.
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="text-center py-20">
+                <div className="text-5xl mb-4 opacity-20">▶</div>
+                <p className="text-zinc-500 text-lg font-medium">No clips yet</p>
+                <p className="text-zinc-600 text-sm mt-1">Hit the + Add icon to start curating</p>
+              </div>
+            ) : (
+              filtered.map((clip, idx) => {
+                const vid = clip.videoId || extractVideoId(clip.url);
+                const isPlaying = playingClip === clip.id;
+                const embedUrl = vid
+                  ? `https://www.youtube.com/embed/${vid}?start=${clip.startTime || 0}${clip.endTime ? `&end=${clip.endTime}` : ''}&autoplay=1&rel=0`
+                  : '';
+
+                return (
+                  <div
+                    key={clip.id}
+                    className={`group relative rounded-2xl border bg-zinc-900/30 transition-colors overflow-hidden ${
+                      idx === 0
+                        ? 'border-blue-500/40 hover:border-blue-500/60'
+                        : 'border-zinc-800/70 hover:border-zinc-700'
+                    }`}
+                  >
+                    {/* Video / Thumbnail (stacked, full width) */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!vid) return;
+                        setPlayingClip((prev) => (prev === clip.id ? null : clip.id));
+                      }}
+                      className="block w-full text-left"
+                      aria-label={isPlaying ? "Stop clip" : "Play clip"}
+                    >
+                      <div className="relative aspect-video w-full bg-zinc-950 border-b border-zinc-800 rounded-t-2xl overflow-hidden">
+                        {isPlaying && vid ? (
+                          <iframe
+                            width="100%"
+                            height="100%"
+                            src={embedUrl}
+                            frameBorder="0"
+                            allowFullScreen
+                            className="absolute inset-0 w-full h-full"
+                          />
+                        ) : (
+                          <>
+                            {vid ? (
+                              <img
+                                src={`https://img.youtube.com/vi/${vid}/mqdefault.jpg`}
+                                alt={clip.title || 'Video thumbnail'}
+                                className="absolute inset-0 w-full h-full object-cover"
+                              />
+                            ) : null}
+
+                            <div className="absolute inset-0 bg-black/10 group-hover:bg-black/30 transition-colors" />
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div className="w-16 h-16 rounded-full bg-black/40 border border-white/25 backdrop-blur-sm flex items-center justify-center">
+                                <div
+                                  className="ml-1"
+                                  style={{
+                                    width: 0,
+                                    height: 0,
+                                    borderLeft: '18px solid white',
+                                    borderTop: '12px solid transparent',
+                                    borderBottom: '12px solid transparent',
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </button>
+
+                    {/* Text content */}
+                    <div className="p-5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-lg font-semibold text-white leading-snug line-clamp-2">
+                            {clip.title || 'Untitled clip'}
+                          </div>
+                          <div className="text-sm text-zinc-500 mt-1 truncate">
+                            {clip.channel || 'Unknown channel'}
+                          </div>
+                          {clip.note ? (
+                            <div className="text-sm text-zinc-400 mt-3 italic line-clamp-3">
+                              &ldquo;{clip.note}&rdquo;
+                            </div>
+                          ) : null}
+                        </div>
+
+                        {/* Hover actions */}
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={() => handleEdit(clip)}
+                            className="text-[11px] text-zinc-400 hover:text-white px-2.5 py-1 rounded-md hover:bg-zinc-800 transition-colors"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(clip.id)}
+                            className="text-[11px] text-zinc-400 hover:text-red-400 px-2.5 py-1 rounded-md hover:bg-zinc-800 transition-colors"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-3 mt-5 pt-4 border-t border-zinc-800/70">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-[11px] font-mono font-semibold bg-emerald-500 text-white px-2.5 py-1 rounded-md">
+                            {clip.endTime ? `${clip.displayStart} — ${clip.displayEnd}` : 'Full video'}
+                          </span>
+                          <span className="text-xs text-zinc-500">
+                            {Math.max(1, 7 + (idx % 9))} users clipped
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            className="text-xs px-3 py-1.5 rounded-full border border-zinc-700 text-zinc-300 hover:bg-zinc-800/60 transition-colors"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!vid) return;
+                              setPlayingClip(clip.id);
+                            }}
+                            className="text-xs font-semibold text-emerald-500 hover:text-emerald-400 transition-colors"
+                          >
+                            Watch clip ↗
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </main>
+
+      {/* ── ADD/EDIT MODAL ── */}
+      {showForm && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => resetForm()}>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-8" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-xl font-bold">{editingClipId ? 'Edit Clip' : 'Add a Clip'}</h2>
+                <p className="text-zinc-500 text-sm mt-0.5">
+                  {editingClipId ? 'Update your clip details' : 'Paste a YouTube URL and highlight the best part'}
+                </p>
+              </div>
+              <button onClick={resetForm} className="text-zinc-500 hover:text-white text-2xl leading-none transition-colors">×</button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-1.5 block">YouTube URL</label>
+                <input
+                  type="text" value={url} placeholder="https://youtube.com/watch?v=..."
+                  className="w-full bg-black border border-zinc-700 p-3.5 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
+                  onChange={(e) => setUrl(e.target.value)}
+                />
+                {previewId && (
+                  <img
+                    src={`https://img.youtube.com/vi/${previewId}/mqdefault.jpg`}
+                    className="w-full rounded-xl mt-3 border border-zinc-800"
+                    alt="Preview"
+                  />
+                )}
+              </div>
+
+              <div>
+                <label className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-1.5 block">Video Title</label>
+                <input
+                  type="text" value={title} placeholder="e.g. Why developing nations fail at industrialization"
+                  className="w-full bg-black border border-zinc-700 p-3.5 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-1.5 block">Channel Name</label>
+                <input
+                  type="text" value={channel} placeholder="e.g. World Bank"
+                  className="w-full bg-black border border-zinc-700 p-3.5 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
+                  onChange={(e) => setChannel(e.target.value)}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-1.5 block">Start Time</label>
+                  <div className="flex gap-2">
+                    <input type="number" value={startMin} placeholder="Min" className="w-full bg-black border border-zinc-700 p-3 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm" onChange={(e) => setStartMin(e.target.value)} />
+                    <input type="number" value={startSec} placeholder="Sec" className="w-full bg-black border border-zinc-700 p-3 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm" onChange={(e) => setStartSec(e.target.value)} />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-1.5 block">End Time</label>
+                  <div className="flex gap-2">
+                    <input type="number" value={endMin} placeholder="Min" className="w-full bg-black border border-zinc-700 p-3 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm" onChange={(e) => setEndMin(e.target.value)} />
+                    <input type="number" value={endSec} placeholder="Sec" className="w-full bg-black border border-zinc-700 p-3 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm" onChange={(e) => setEndSec(e.target.value)} />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-1.5 block">Your Note</label>
+                <textarea
+                  value={note} placeholder="Why should someone watch this?"
+                  className="w-full bg-black border border-zinc-700 p-3.5 rounded-xl h-20 outline-none resize-none focus:border-zinc-500 transition-colors text-sm"
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-2 block">Topic</label>
+                <div className="flex flex-wrap gap-2">
+                  {TOPICS.map(t => (
+                    <button
+                      key={t}
+                      onClick={() => setTopic(t)}
+                      className={`text-xs px-3.5 py-1.5 rounded-full transition-all ${
+                        topic === t
+                          ? 'bg-white text-black font-semibold'
+                          : 'bg-zinc-800 text-zinc-500 hover:text-white border border-zinc-700/50'
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                onClick={handleSave}
+                disabled={loading || !url || !title}
+                className={`w-full font-bold py-4 rounded-xl transition-all text-sm mt-2 ${
+                  url && title
+                    ? 'bg-white text-black hover:bg-zinc-200'
+                    : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
+                }`}
+              >
+                {loading ? "Saving..." : editingClipId ? "Save Changes" : "Save Clip"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
