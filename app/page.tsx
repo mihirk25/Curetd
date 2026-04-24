@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { db } from '../firebase'; 
-import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, onSnapshot, setDoc } from "firebase/firestore";
+import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc, serverTimestamp, query, orderBy, onSnapshot, setDoc } from "firebase/firestore";
 import { useAuth } from "./auth-context";
 import { UsernameSetup, useUsername } from "./username-setup";
 import { CuratorSearchBar } from "./curator-search-bar";
@@ -158,7 +158,8 @@ export default function CuratdMVP() {
   const pendingAddClipAfterAuth = useRef(false);
   const hadAuthenticatedUser = useRef(false);
   const [playingClip, setPlayingClip] = useState<string | null>(null);
-  const [selectedTopic, setSelectedTopic] = useState("All");
+  const [topicSearch, setTopicSearch] = useState("");
+  const [usernamesByUid, setUsernamesByUid] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const q = query(collection(db, "clips"), orderBy("createdAt", "desc"));
@@ -210,8 +211,53 @@ export default function CuratdMVP() {
   }, [user]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      const missing = new Set<string>();
+      for (const c of clips) {
+        const uid = c?.userId;
+        if (typeof uid !== "string" || !uid) continue;
+        const hasClipUsername = typeof c?.username === "string" && c.username.trim();
+        if (hasClipUsername) continue;
+        if (usernamesByUid[uid]) continue;
+        missing.add(uid);
+      }
+      if (missing.size === 0) return;
+
+      const entries = await Promise.all(
+        [...missing].map(async (uid) => {
+          try {
+            const snap = await getDoc(doc(db, "users", uid));
+            const data = snap.exists() ? (snap.data() as any) : null;
+            const u = typeof data?.username === "string" ? data.username.trim().toLowerCase() : "";
+            if (!u) return null;
+            return [uid, u] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      if (cancelled) return;
+      const next: Record<string, string> = {};
+      for (const e of entries) {
+        if (!e) continue;
+        next[e[0]] = e[1];
+      }
+      if (Object.keys(next).length === 0) return;
+      setUsernamesByUid((prev) => ({ ...prev, ...next }));
+    }
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [clips, usernamesByUid]);
+
+  useEffect(() => {
     setPlayingClip(null);
-  }, [selectedTopic]);
+  }, [topicSearch]);
 
   const fetchVideoInfo = async (ytUrl: string) => {
     try {
@@ -335,22 +381,15 @@ export default function CuratdMVP() {
     }
   };
 
-  const usedTopics = useMemo(() => {
-    if (!user?.uid) return [];
-    const set = new Set<string>();
-    for (const c of clips) {
-      if (c?.userId !== user.uid) continue;
-      const t = c?.topic;
-      if (typeof t === "string" && t.trim()) set.add(t.trim());
-    }
-    return [...set].sort((a, b) => a.localeCompare(b));
-  }, [clips, user?.uid]);
-
-  const filtered = (() => {
+  const filtered = useMemo(() => {
     const bySaved = showSaved ? clips.filter((c) => savedClips.includes(c.id)) : clips;
-    if (selectedTopic === "All") return bySaved;
-    return bySaved.filter((c) => c.topic === selectedTopic);
-  })();
+    const q = topicSearch.trim().toLowerCase();
+    if (!q) return bySaved;
+    return bySaved.filter((c) => {
+      const t = c?.topic;
+      return typeof t === "string" && t.toLowerCase().includes(q);
+    });
+  }, [clips, showSaved, savedClips, topicSearch]);
   const previewId = extractVideoId(url);
 
   return (
@@ -413,6 +452,7 @@ export default function CuratdMVP() {
           type="button"
           onClick={() => {
             setShowSaved(false);
+            setTopicSearch("");
             setPlayingClip(null);
           }}
           className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center hover:bg-emerald-500/20 transition-colors"
@@ -429,6 +469,7 @@ export default function CuratdMVP() {
             type="button"
             onClick={() => {
               setShowSaved(false);
+              setTopicSearch("");
               setPlayingClip(null);
             }}
             className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-colors ${
@@ -464,37 +505,40 @@ export default function CuratdMVP() {
       {/* Middle sidebar */}
       <aside className="w-[220px] border-r border-zinc-800 px-5 py-5 overflow-y-auto">
         <div className="space-y-8">
-          {/* Your Topics */}
-          <section>
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-white">Your Topics</h3>
-            </div>
-            <div className="flex gap-2 flex-wrap mt-3">
+          {/* Topic search (filters main feed) */}
+          <section className="border-b border-zinc-800/80 pb-4">
+            <div className="flex flex-col gap-2">
               <button
                 type="button"
-                onClick={() => setSelectedTopic("All")}
-                className={`text-[11px] px-3 py-1 rounded-full transition-colors ${
-                  selectedTopic === "All" ? "bg-white text-black" : "bg-zinc-900 text-zinc-400 border border-zinc-700"
+                onClick={() => setTopicSearch("")}
+                className={`w-full shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  !topicSearch.trim()
+                    ? "border-white bg-white font-semibold text-black"
+                    : "border-zinc-700 bg-zinc-900/40 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
                 }`}
               >
                 All
               </button>
-              {usedTopics.length === 0 ? (
-                <span className="text-xs text-zinc-500 self-center">No topics yet</span>
-              ) : (
-                usedTopics.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setSelectedTopic(t)}
-                    className={`text-[11px] px-3 py-1 rounded-full transition-colors ${
-                      selectedTopic === t ? "bg-white text-black" : "bg-zinc-900 text-zinc-400 border border-zinc-700"
-                    }`}
-                  >
-                    {t}
-                  </button>
-                ))
-              )}
+              <div className="relative min-w-0">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" aria-hidden>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="opacity-80">
+                    <path
+                      d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    />
+                    <path d="M16 16l4.5 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                </span>
+                <input
+                  type="search"
+                  value={topicSearch}
+                  onChange={(e) => setTopicSearch(e.target.value)}
+                  placeholder="Search topics..."
+                  autoComplete="off"
+                  className="w-full rounded-full border border-zinc-700 bg-zinc-900 py-2 pl-8 pr-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-zinc-500"
+                />
+              </div>
             </div>
           </section>
 
@@ -525,7 +569,10 @@ export default function CuratdMVP() {
             {showSaved && (
               <button
                 type="button"
-                onClick={() => setShowSaved(false)}
+                onClick={() => {
+                  setShowSaved(false);
+                  setTopicSearch("");
+                }}
                 className="mt-2 text-xs text-zinc-500 hover:text-white transition-colors"
               >
                 Show All
@@ -548,7 +595,13 @@ export default function CuratdMVP() {
               </div>
             ) : filtered.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
-                <p className="text-zinc-500">No clips in {selectedTopic} yet</p>
+                <p className="text-zinc-500">
+                  {topicSearch.trim()
+                    ? `No clips match "${topicSearch.trim()}"`
+                    : showSaved
+                      ? "No saved clips yet"
+                      : "No clips match your filters"}
+                </p>
               </div>
             ) : (
               filtered.map((clip, idx) => {
@@ -630,18 +683,32 @@ export default function CuratdMVP() {
                             ) : null}
                             <span className="text-xs text-zinc-500">
                               Curated by{" "}
-                              {typeof clip.username === "string" && clip.username.trim() ? (
-                                <Link
-                                  href={`/${clip.username.trim().toLowerCase()}`}
-                                  className="font-medium text-zinc-300 hover:text-emerald-400 hover:underline"
-                                >
-                                  @{clip.username.trim().toLowerCase()}
-                                </Link>
-                              ) : (
+                            {(() => {
+                              const handleFromClip =
+                                typeof clip.username === "string" && clip.username.trim()
+                                  ? clip.username.trim().toLowerCase()
+                                  : null;
+                              const handleFromLookup =
+                                !handleFromClip && typeof clip.userId === "string"
+                                  ? usernamesByUid[clip.userId] ?? null
+                                  : null;
+                              const handle = handleFromClip || handleFromLookup;
+                              if (handle) {
+                                return (
+                                  <Link
+                                    href={`/${handle}`}
+                                    className="font-medium text-zinc-300 hover:text-emerald-400 hover:underline"
+                                  >
+                                    @{handle}
+                                  </Link>
+                                );
+                              }
+                              return (
                                 <span className="text-zinc-300 font-medium">
                                   {clip.userDisplayName || "Unknown curator"}
                                 </span>
-                              )}
+                              );
+                            })()}
                             </span>
                           </div>
                           {clip.note ? (
