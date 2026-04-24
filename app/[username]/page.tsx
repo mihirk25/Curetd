@@ -60,7 +60,7 @@ export default function PublicProfilePage() {
   const [notFound, setNotFound] = useState(false);
   const [profile, setProfile] = useState<{ uid: string; username: string; displayName: string; photoURL: string | null } | null>(null);
   const [clips, setClips] = useState<any[]>([]);
-  const [topicFilter, setTopicFilter] = useState<string>("All");
+  const [topicSearch, setTopicSearch] = useState("");
   const [playingClip, setPlayingClip] = useState<string | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [following, setFollowing] = useState(false);
@@ -176,26 +176,22 @@ export default function PublicProfilePage() {
   const showFollowButton = profile != null && (!user || user.uid !== profile.uid);
   const isOwnProfile = profile != null && user?.uid === profile.uid;
 
-  const profileTopics = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of clips) {
-      const t = c?.topic;
-      if (typeof t === "string" && t.trim()) set.add(t.trim());
-    }
-    return [...set].sort((a, b) => a.localeCompare(b));
-  }, [clips]);
-
   const filteredClips = useMemo(() => {
-    if (topicFilter === "All") return clips;
-    return clips.filter((c) => c?.topic === topicFilter);
-  }, [clips, topicFilter]);
+    const q = topicSearch.trim().toLowerCase();
+    if (!q) return clips;
+    return clips.filter((c) => {
+      const t = c?.topic;
+      if (typeof t !== "string") return false;
+      return t.toLowerCase().includes(q);
+    });
+  }, [clips, topicSearch]);
 
   useEffect(() => {
     setPlayingClip(null);
-  }, [topicFilter]);
+  }, [topicSearch]);
 
   useEffect(() => {
-    setTopicFilter("All");
+    setTopicSearch("");
   }, [username]);
 
   const handleAvatarFileSelected = useCallback(
@@ -403,34 +399,39 @@ export default function PublicProfilePage() {
             </div>
 
             {clips.length > 0 ? (
-              <section className="mt-6">
-                <h3 className="text-sm font-semibold text-white mb-3">Your Topics</h3>
-                <div className="flex flex-wrap gap-2 border-b border-zinc-800/80 pb-4">
-                <button
-                  type="button"
-                  onClick={() => setTopicFilter("All")}
-                  className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors ${
-                    topicFilter === "All"
-                      ? "border-white bg-white font-semibold text-black"
-                      : "border-zinc-700 bg-zinc-900/40 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
-                  }`}
-                >
-                  All
-                </button>
-                {profileTopics.map((t) => (
+              <section className="mt-6 border-b border-zinc-800/80 pb-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3">
                   <button
-                    key={t}
                     type="button"
-                    onClick={() => setTopicFilter(t)}
-                    className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors ${
-                      topicFilter === t
+                    onClick={() => setTopicSearch("")}
+                    className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors ${
+                      !topicSearch.trim()
                         ? "border-white bg-white font-semibold text-black"
                         : "border-zinc-700 bg-zinc-900/40 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
                     }`}
                   >
-                    {t}
+                    All
                   </button>
-                ))}
+                  <div className="relative min-w-0 flex-1">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" aria-hidden>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="opacity-80">
+                        <path
+                          d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        />
+                        <path d="M16 16l4.5 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                    </span>
+                    <input
+                      type="search"
+                      value={topicSearch}
+                      onChange={(e) => setTopicSearch(e.target.value)}
+                      placeholder="Search topics..."
+                      autoComplete="off"
+                      className="w-full rounded-full border border-zinc-700 bg-zinc-900 py-2 pl-9 pr-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-zinc-500"
+                    />
+                  </div>
                 </div>
               </section>
             ) : null}
@@ -455,7 +456,7 @@ export default function PublicProfilePage() {
                     <circle cx="9" cy="13" r="2" stroke="currentColor" strokeWidth="1.5" />
                   </svg>
                   <p className="text-sm text-zinc-400">
-                    No clips in {topicFilter} yet
+                    No clips match &ldquo;{topicSearch.trim()}&rdquo;
                   </p>
                 </div>
               ) : (

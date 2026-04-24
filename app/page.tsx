@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { db } from '../firebase'; 
 import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, onSnapshot, setDoc } from "firebase/firestore";
@@ -283,7 +283,8 @@ export default function CuratdMVP() {
       const clipData = {
         url, videoId, title, channel, topic,
         userId: user.uid,
-        userDisplayName: user.displayName || 'Anonymous',
+        userDisplayName: user.displayName || "Anonymous",
+        username: username ?? null,
         startTime: totalStart, endTime: totalEnd,
         displayStart: `${startMin || 0}:${(startSec || '00').toString().padStart(2, '0')}`,
         displayEnd: `${endMin || 0}:${(endSec || '00').toString().padStart(2, '0')}`,
@@ -334,7 +335,17 @@ export default function CuratdMVP() {
     }
   };
 
-  const usedTopics = [...new Set(clips.map(c => c.topic).filter(Boolean))];
+  const usedTopics = useMemo(() => {
+    if (!user?.uid) return [];
+    const set = new Set<string>();
+    for (const c of clips) {
+      if (c?.userId !== user.uid) continue;
+      const t = c?.topic;
+      if (typeof t === "string" && t.trim()) set.add(t.trim());
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [clips, user?.uid]);
+
   const filtered = (() => {
     const bySaved = showSaved ? clips.filter((c) => savedClips.includes(c.id)) : clips;
     if (selectedTopic === "All") return bySaved;
@@ -619,9 +630,18 @@ export default function CuratdMVP() {
                             ) : null}
                             <span className="text-xs text-zinc-500">
                               Curated by{" "}
-                              <span className="text-zinc-300 font-medium">
-                                {clip.userDisplayName || "Unknown curator"}
-                              </span>
+                              {typeof clip.username === "string" && clip.username.trim() ? (
+                                <Link
+                                  href={`/${clip.username.trim().toLowerCase()}`}
+                                  className="font-medium text-zinc-300 hover:text-emerald-400 hover:underline"
+                                >
+                                  @{clip.username.trim().toLowerCase()}
+                                </Link>
+                              ) : (
+                                <span className="text-zinc-300 font-medium">
+                                  {clip.userDisplayName || "Unknown curator"}
+                                </span>
+                              )}
                             </span>
                           </div>
                           {clip.note ? (
