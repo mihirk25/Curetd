@@ -1,17 +1,29 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { db } from "../../firebase";
+import { updateProfile } from "firebase/auth";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   orderBy,
   query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
   where,
 } from "firebase/firestore";
+import { auth, db, storage } from "../../firebase";
+import { useAuth } from "../auth-context";
+import { UsernameSetup, useUsername } from "../username-setup";
+import { CuratorSearchBar } from "../curator-search-bar";
+import { SignInCuratorModal } from "../sign-in-curator-modal";
 
 function extractVideoId(url: string) {
   if (!url) return null;
@@ -41,11 +53,20 @@ export default function PublicProfilePage() {
   const usernameParam = (params?.username || "").toString();
   const username = useMemo(() => decodeURIComponent(usernameParam).trim().toLowerCase(), [usernameParam]);
 
+  const { user, signIn, signOut: handleSignOut } = useAuth();
+  const myUsername = useUsername();
+
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [profile, setProfile] = useState<any | null>(null);
+  const [profile, setProfile] = useState<{ uid: string; username: string; displayName: string; photoURL: string | null } | null>(null);
   const [clips, setClips] = useState<any[]>([]);
+  const [topicFilter, setTopicFilter] = useState<string>("All");
   const [playingClip, setPlayingClip] = useState<string | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [following, setFollowing] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,11 +106,7 @@ export default function PublicProfilePage() {
         const userSnap = await getDoc(doc(db, "users", uid));
         const userData = userSnap.exists() ? userSnap.data() : null;
 
-        const clipsQ = query(
-          collection(db, "clips"),
-          where("userId", "==", uid),
-          orderBy("createdAt", "desc"),
-        );
+        const clipsQ = query(collection(db, "clips"), where("userId", "==", uid), orderBy("createdAt", "desc"));
         const clipsSnap = await getDocs(clipsQ);
 
         if (cancelled) return;
@@ -116,9 +133,161 @@ export default function PublicProfilePage() {
     };
   }, [username]);
 
+  useEffect(() => {
+    if (!user || !profile || user.uid === profile.uid) {
+      setFollowing(false);
+      return;
+    }
+    const followId = `${user.uid}_${profile.uid}`;
+    const followRef = doc(db, "follows", followId);
+    const unsub = onSnapshot(followRef, (snap) => {
+      setFollowing(snap.exists());
+    });
+    return () => unsub();
+  }, [user?.uid, profile?.uid]);
+
+  const toggleFollow = useCallback(async () => {
+    if (!profile) return;
+    if (user == null) {
+      setShowAuthModal(true);
+      return;
+    }
+    if (user.uid === profile.uid) return;
+    const followId = `${user.uid}_${profile.uid}`;
+    const followRef = doc(db, "follows", followId);
+    setFollowBusy(true);
+    try {
+      if (following) {
+        await deleteDoc(followRef);
+      } else {
+        await setDoc(followRef, {
+          followerUid: user.uid,
+          followingUid: profile.uid,
+          createdAt: serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setFollowBusy(false);
+    }
+  }, [user, profile, following]);
+
+  const showFollowButton = profile != null && (!user || user.uid !== profile.uid);
+  const isOwnProfile = profile != null && user?.uid === profile.uid;
+
+  const profileTopics = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of clips) {
+      const t = c?.topic;
+      if (typeof t === "string" && t.trim()) set.add(t.trim());
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [clips]);
+
+  const filteredClips = useMemo(() => {
+    if (topicFilter === "All") return clips;
+    return clips.filter((c) => c?.topic === topicFilter);
+  }, [clips, topicFilter]);
+
+  useEffect(() => {
+    setPlayingClip(null);
+  }, [topicFilter]);
+
+  useEffect(() => {
+    setTopicFilter("All");
+  }, [username]);
+
+  const handleAvatarFileSelected = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file || !user || !profile || user.uid !== profile.uid) return;
+
+      const allowed = ["image/jpeg", "image/png", "image/webp"];
+      if (!allowed.includes(file.type)) {
+        alert("Please choose a JPG, PNG, or WebP image.");
+        return;
+      }
+      if (file.size > 2 * 1024 * 1024) {
+        alert("Image must be under 2MB");
+        return;
+      }
+
+      setAvatarUploading(true);
+      try {
+        const storageRef = ref(storage, `profilePhotos/${user.uid}`);
+        await uploadBytes(storageRef, file, { contentType: file.type });
+        const url = await getDownloadURL(storageRef);
+        await updateDoc(doc(db, "users", user.uid), { photoURL: url });
+        if (auth.currentUser) {
+          await updateProfile(auth.currentUser, { photoURL: url });
+        }
+        setProfile((prev) => (prev ? { ...prev, photoURL: url } : null));
+      } catch (err) {
+        console.error(err);
+        alert("Could not upload photo. Please try again.");
+      } finally {
+        setAvatarUploading(false);
+      }
+    },
+    [user, profile],
+  );
+
   return (
-    <div className="min-h-screen bg-black text-white font-sans">
-      <div className="max-w-3xl mx-auto px-6 py-10">
+    <div className="min-h-screen bg-black text-white font-sans flex flex-col">
+      <UsernameSetup />
+      <header className="shrink-0 h-14 border-b border-zinc-800 grid grid-cols-[minmax(0,auto)_1fr_minmax(0,auto)] items-center gap-4 px-4 bg-black">
+        <Link href="/" className="text-sm font-bold tracking-tight text-white hover:text-zinc-200 transition-colors shrink-0">
+          CURATD
+        </Link>
+        <div className="flex min-w-0 justify-center px-2">
+          <CuratorSearchBar />
+        </div>
+        <div className="flex items-center gap-3 min-w-0 justify-self-end">
+          {user ? (
+            <>
+              <Link
+                href={myUsername ? `/${myUsername}` : "/"}
+                className="flex items-center gap-2 min-w-0 rounded-xl px-2 py-1.5 hover:bg-zinc-900/80 transition-colors"
+                title={user.displayName || "Your library"}
+              >
+                {user.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt=""
+                    className="w-8 h-8 rounded-full object-cover border border-zinc-700 shrink-0"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center text-black text-xs font-bold shrink-0">
+                    {(user.displayName || "U").slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <span className="text-sm font-medium text-zinc-100 truncate max-w-[160px] sm:max-w-[220px]">
+                  {user.displayName || "Account"}
+                </span>
+              </Link>
+              <button
+                type="button"
+                onClick={() => void handleSignOut()}
+                className="text-xs text-zinc-500 hover:text-red-400 px-2 py-1.5 rounded-lg hover:bg-zinc-900 transition-colors shrink-0"
+              >
+                Sign out
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void signIn()}
+              className="text-sm font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-zinc-200 transition-colors"
+            >
+              Sign In
+            </button>
+          )}
+        </div>
+      </header>
+
+      <div className="max-w-3xl mx-auto w-full flex-1 px-6 py-10">
         {loading ? (
           <div className="text-zinc-500 text-sm">Loading…</div>
         ) : notFound || !profile ? (
@@ -127,45 +296,170 @@ export default function PublicProfilePage() {
             <div className="text-sm text-zinc-500 mt-1">
               No profile exists for <span className="text-emerald-500 font-semibold">@{usernameParam}</span>.
             </div>
+            <Link
+              href="/"
+              className="mt-6 inline-block text-sm font-semibold text-emerald-500 hover:text-emerald-400 transition-colors"
+            >
+              ← Back to feed
+            </Link>
           </div>
         ) : (
           <>
-            {/* Profile header */}
             <div className="border border-zinc-800 rounded-3xl bg-zinc-900/20 p-6">
               <div className="flex items-start gap-4">
-                {profile.photoURL ? (
+                {isOwnProfile ? (
+                  <div className="relative h-14 w-14 shrink-0 group">
+                    <input
+                      ref={avatarFileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                      className="hidden"
+                      onChange={(ev) => void handleAvatarFileSelected(ev)}
+                    />
+                    {profile.photoURL ? (
+                      <img
+                        src={profile.photoURL}
+                        alt=""
+                        className="pointer-events-none h-14 w-14 rounded-full border border-zinc-800 object-cover"
+                      />
+                    ) : (
+                      <div className="pointer-events-none flex h-14 w-14 items-center justify-center rounded-full border border-zinc-800 bg-emerald-500 text-xl font-bold text-black">
+                        {(profile.displayName || "A").slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      disabled={avatarUploading}
+                      onClick={() => avatarFileInputRef.current?.click()}
+                      className="absolute inset-0 flex cursor-pointer items-center justify-center rounded-full bg-black/0 transition-colors hover:bg-black/55 group-hover:bg-black/55 disabled:cursor-not-allowed disabled:opacity-100"
+                      aria-label="Change profile photo"
+                      title="Change profile photo"
+                    >
+                      {!avatarUploading ? (
+                        <span className="rounded-full bg-black/50 p-2 text-white opacity-0 shadow-sm transition-opacity group-hover:opacity-100">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden className="text-white">
+                            <path
+                              d="M4 7h3l1.5-2h7L17 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"
+                              stroke="currentColor"
+                              strokeWidth="1.75"
+                              strokeLinejoin="round"
+                            />
+                            <circle cx="12" cy="13" r="3.25" stroke="currentColor" strokeWidth="1.75" />
+                          </svg>
+                        </span>
+                      ) : null}
+                    </button>
+                    {avatarUploading ? (
+                      <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-full bg-black/70">
+                        <div
+                          className="h-7 w-7 animate-spin rounded-full border-2 border-zinc-500 border-t-emerald-400"
+                          role="status"
+                          aria-label="Uploading"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                ) : profile.photoURL ? (
                   <img
                     src={profile.photoURL}
                     alt={profile.displayName}
-                    className="w-14 h-14 rounded-full object-cover border border-zinc-800"
+                    className="h-14 w-14 shrink-0 rounded-full border border-zinc-800 object-cover"
                   />
                 ) : (
-                  <div className="w-14 h-14 rounded-full bg-emerald-500 flex items-center justify-center text-black text-xl font-bold">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-xl font-bold text-black">
                     {(profile.displayName || "A").slice(0, 1).toUpperCase()}
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="text-2xl font-bold leading-tight truncate">{profile.displayName}</div>
-                  <div className="text-sm text-zinc-500 mt-1">
-                    <span className="text-emerald-500 font-semibold">@{profile.username}</span>
-                    <span className="mx-2 text-zinc-700">·</span>
-                    <span>
-                      <span className="text-white font-semibold">{clips.length}</span>{" "}
-                      <span className="text-zinc-500">clips</span>
-                    </span>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-2xl font-bold leading-tight truncate">{profile.displayName}</div>
+                      <div className="text-sm text-zinc-500 mt-1">
+                        <span className="text-emerald-500 font-semibold">@{profile.username}</span>
+                        <span className="mx-2 text-zinc-700">·</span>
+                        <span>
+                          <span className="text-white font-semibold">{clips.length}</span>{" "}
+                          <span className="text-zinc-500">clips</span>
+                        </span>
+                      </div>
+                    </div>
+                    {showFollowButton ? (
+                      <button
+                        type="button"
+                        disabled={followBusy}
+                        onClick={() => void toggleFollow()}
+                        className={`shrink-0 text-sm font-semibold px-4 py-2 rounded-full border transition-colors ${
+                          following
+                            ? "border-zinc-600 text-zinc-300 hover:bg-zinc-800/60"
+                            : "border-emerald-500 text-emerald-500 hover:bg-emerald-500/10"
+                        } ${followBusy ? "opacity-50 cursor-not-allowed" : ""}`}
+                      >
+                        {following ? "Following" : "Follow"}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Clips */}
-            <div className="mt-6 space-y-4 pb-16">
+            {clips.length > 0 ? (
+              <section className="mt-6">
+                <h3 className="text-sm font-semibold text-white mb-3">Your Topics</h3>
+                <div className="flex flex-wrap gap-2 border-b border-zinc-800/80 pb-4">
+                <button
+                  type="button"
+                  onClick={() => setTopicFilter("All")}
+                  className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors ${
+                    topicFilter === "All"
+                      ? "border-white bg-white font-semibold text-black"
+                      : "border-zinc-700 bg-zinc-900/40 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+                  }`}
+                >
+                  All
+                </button>
+                {profileTopics.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTopicFilter(t)}
+                    className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors ${
+                      topicFilter === t
+                        ? "border-white bg-white font-semibold text-black"
+                        : "border-zinc-700 bg-zinc-900/40 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+                </div>
+              </section>
+            ) : null}
+
+            <div className={`space-y-4 pb-16 ${clips.length > 0 ? "mt-4" : "mt-6"}`}>
               {clips.length === 0 ? (
                 <div className="text-center py-16 border border-zinc-800 rounded-2xl bg-zinc-900/20">
                   <div className="text-zinc-500 text-sm">No clips yet</div>
                 </div>
+              ) : filteredClips.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/20 py-20 px-6 text-center">
+                  <svg
+                    width="40"
+                    height="40"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    className="text-zinc-600"
+                    aria-hidden
+                  >
+                    <rect x="2" y="5" width="20" height="14" rx="2" stroke="currentColor" strokeWidth="1.5" />
+                    <path d="M2 10h4l2-2h12v9H2V10Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                    <circle cx="9" cy="13" r="2" stroke="currentColor" strokeWidth="1.5" />
+                  </svg>
+                  <p className="text-sm text-zinc-400">
+                    No clips in {topicFilter} yet
+                  </p>
+                </div>
               ) : (
-                clips.map((clip, idx) => {
+                filteredClips.map((clip, idx) => {
                   const vid = clip.videoId || extractVideoId(clip.url);
                   const isPlaying = playingClip === clip.id;
                   const embedUrl = vid
@@ -181,7 +475,6 @@ export default function PublicProfilePage() {
                           : "border-zinc-800/70 hover:border-zinc-700"
                       }`}
                     >
-                      {/* Video / Thumbnail */}
                       <button
                         type="button"
                         onClick={() => {
@@ -197,6 +490,7 @@ export default function PublicProfilePage() {
                               width="100%"
                               height="100%"
                               src={embedUrl}
+                              title={clip.title || "Clip"}
                               frameBorder="0"
                               allowFullScreen
                               className="absolute inset-0 w-full h-full"
@@ -230,15 +524,12 @@ export default function PublicProfilePage() {
                         </div>
                       </button>
 
-                      {/* Text content */}
                       <div className="p-5">
                         <div className="min-w-0">
                           <div className="text-lg font-semibold text-white leading-snug line-clamp-2">
                             {clip.title || "Untitled clip"}
                           </div>
-                          <div className="text-sm text-zinc-500 mt-1 truncate">
-                            {clip.channel || "Unknown channel"}
-                          </div>
+                          <div className="text-sm text-zinc-500 mt-1 truncate">{clip.channel || "Unknown channel"}</div>
                           {clip.note ? (
                             <div className="text-base text-zinc-100 font-medium italic border-l-2 border-emerald-500 pl-3 mt-2 line-clamp-3">
                               &ldquo;{clip.note}&rdquo;
@@ -251,14 +542,9 @@ export default function PublicProfilePage() {
                             <span className="text-[11px] font-mono font-semibold bg-emerald-500 text-white px-2.5 py-1 rounded-md">
                               {clip.endTime ? `${clip.displayStart} — ${clip.displayEnd}` : "Full video"}
                             </span>
-                            <span className="text-xs text-zinc-500">
-                              {Math.max(1, 7 + (idx % 9))} users clipped
-                              {clip.endTime > 0 ? (
-                                <span className="ml-2 text-zinc-600">
-                                  · {formatDuration(clip.startTime, clip.endTime)}
-                                </span>
-                              ) : null}
-                            </span>
+                            {(clip.endTime ?? 0) > 0 ? (
+                              <span className="text-xs text-zinc-500">{formatDuration(clip.startTime, clip.endTime)}</span>
+                            ) : null}
                           </div>
 
                           <button
@@ -284,7 +570,13 @@ export default function PublicProfilePage() {
           </>
         )}
       </div>
+
+      <SignInCuratorModal
+        open={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        title="Sign in to follow curators"
+        subtitle="Follow curators to keep track of their clips (saves to your account)."
+      />
     </div>
   );
 }
-

@@ -2,9 +2,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { db } from '../firebase'; 
-import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, onSnapshot, setDoc, where, limit } from "firebase/firestore";
-import { useAuth } from './auth-context';
-import { UsernameSetup, useUsername } from './username-setup';
+import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, onSnapshot, setDoc } from "firebase/firestore";
+import { useAuth } from "./auth-context";
+import { UsernameSetup, useUsername } from "./username-setup";
+import { CuratorSearchBar } from "./curator-search-bar";
+import { SignInCuratorModal } from "./sign-in-curator-modal";
 
 declare global {
   interface Window {
@@ -132,148 +134,8 @@ function extractVideoId(url: string) {
 
 const TOPICS = ["Economics", "Startups", "Stand-up", "Data", "Finance", "Tech", "Science", "Design", "History", "Fitness", "Philosophy", "Music", "Podcast", "Other"];
 
-type CuratorSearchHit = {
-  id: string;
-  username?: string;
-  displayName?: string | null;
-  photoURL?: string | null;
-};
-
-function CuratorSearchBar() {
-  const [searchText, setSearchText] = useState("");
-  const [debouncedPrefix, setDebouncedPrefix] = useState("");
-  const [open, setOpen] = useState(false);
-  const [hits, setHits] = useState<CuratorSearchHit[]>([]);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      setDebouncedPrefix(searchText.trim().toLowerCase());
-    }, 200);
-    return () => window.clearTimeout(t);
-  }, [searchText]);
-
-  useEffect(() => {
-    if (!debouncedPrefix) {
-      setHits([]);
-      return;
-    }
-    const q = query(
-      collection(db, "users"),
-      where("displayNameLower", ">=", debouncedPrefix),
-      where("displayNameLower", "<=", `${debouncedPrefix}\uf8ff`),
-      orderBy("displayNameLower"),
-      limit(20),
-    );
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const rows: CuratorSearchHit[] = snap.docs
-          .map((d) => {
-            const data = d.data() as Record<string, unknown>;
-            return {
-              id: d.id,
-              username: typeof data.username === "string" ? data.username : undefined,
-              displayName: (data.displayName as string | null | undefined) ?? null,
-              photoURL: (data.photoURL as string | null | undefined) ?? null,
-            };
-          })
-          .filter((row) => row.username);
-        setHits(rows);
-      },
-      () => setHits([]),
-    );
-    return () => unsub();
-  }, [debouncedPrefix]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: PointerEvent) => {
-      const el = wrapRef.current;
-      if (el && !el.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
-
-  const showDropdown = open && searchText.trim().length > 0;
-  const trimmedLower = searchText.trim().toLowerCase();
-  const pendingSync = trimmedLower !== debouncedPrefix;
-
-  return (
-    <div ref={wrapRef} className="relative w-[300px] max-w-full">
-      <div className="flex h-9 w-full items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900 px-3">
-        <span className="text-zinc-500 shrink-0" aria-hidden>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="opacity-80">
-            <path
-              d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"
-              stroke="currentColor"
-              strokeWidth="2"
-            />
-            <path d="M16 16l4.5 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-          </svg>
-        </span>
-        <input
-          type="search"
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          onFocus={() => setOpen(true)}
-          placeholder="Search curators..."
-          autoComplete="off"
-          autoCorrect="off"
-          spellCheck={false}
-          className="min-w-0 flex-1 bg-transparent text-sm text-zinc-100 placeholder:text-zinc-500 outline-none"
-          aria-autocomplete="list"
-          aria-expanded={showDropdown}
-        />
-      </div>
-      {showDropdown ? (
-        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-[60] max-h-64 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950 py-1 shadow-xl">
-          {pendingSync ? (
-            <div className="px-3 py-3 text-center text-sm text-zinc-600">…</div>
-          ) : hits.length === 0 ? (
-            <div className="px-3 py-3 text-center text-sm text-zinc-500">No curators found</div>
-          ) : (
-            hits.map((h) => (
-              <Link
-                key={h.id}
-                href={`/${h.username}`}
-                onClick={() => {
-                  setOpen(false);
-                  setSearchText("");
-                  setDebouncedPrefix("");
-                }}
-                className="flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-900/90 transition-colors"
-              >
-                {h.photoURL ? (
-                  <img
-                    src={h.photoURL}
-                    alt=""
-                    className="h-9 w-9 shrink-0 rounded-full border border-zinc-700 object-cover"
-                  />
-                ) : (
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-xs font-semibold text-zinc-300">
-                    {(h.displayName || "?").slice(0, 1).toUpperCase()}
-                  </div>
-                )}
-                <div className="min-w-0 flex-1 text-left">
-                  <div className="truncate text-sm font-medium text-zinc-100">{h.displayName || "Anonymous"}</div>
-                  <div className="truncate text-xs text-zinc-500">@{h.username}</div>
-                </div>
-              </Link>
-            ))
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 export default function CuratdMVP() {
   const { user, signIn, signOut: handleSignOut } = useAuth();
-  const signInWithGoogle = signIn;
   const username = useUsername();
   const [url, setUrl] = useState('');
   const [startMin, setStartMin] = useState('');
@@ -283,7 +145,8 @@ export default function CuratdMVP() {
   const [note, setNote] = useState('');
   const [title, setTitle] = useState('');
   const [channel, setChannel] = useState('');
-  const [topic, setTopic] = useState('Other');
+  const [topic, setTopic] = useState("Other");
+  const [customTopicDraft, setCustomTopicDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [fetchingInfo, setFetchingInfo] = useState(false);
   const [savedClips, setSavedClips] = useState<string[]>([]);
@@ -294,8 +157,8 @@ export default function CuratdMVP() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const pendingAddClipAfterAuth = useRef(false);
   const hadAuthenticatedUser = useRef(false);
-  const [activeFilter, setActiveFilter] = useState('All');
   const [playingClip, setPlayingClip] = useState<string | null>(null);
+  const [selectedTopic, setSelectedTopic] = useState("All");
 
   useEffect(() => {
     const q = query(collection(db, "clips"), orderBy("createdAt", "desc"));
@@ -346,6 +209,10 @@ export default function CuratdMVP() {
     }
   }, [user]);
 
+  useEffect(() => {
+    setPlayingClip(null);
+  }, [selectedTopic]);
+
   const fetchVideoInfo = async (ytUrl: string) => {
     try {
       setFetchingInfo(true);
@@ -371,6 +238,7 @@ export default function CuratdMVP() {
     setTitle("");
     setChannel("");
     setTopic("Other");
+    setCustomTopicDraft("");
     setEditingClipId(null);
     setShowForm(false);
   };
@@ -385,8 +253,16 @@ export default function CuratdMVP() {
     setTitle("");
     setChannel("");
     setTopic("Other");
+    setCustomTopicDraft("");
     setEditingClipId(null);
     setShowForm(true);
+  };
+
+  const applyCustomTopic = () => {
+    const v = customTopicDraft.trim();
+    if (!v) return;
+    setTopic(v);
+    setCustomTopicDraft("");
   };
 
   const closeAuthModal = () => {
@@ -430,8 +306,9 @@ export default function CuratdMVP() {
     setUrl(clip.url || '');
     setTitle(clip.title || '');
     setChannel(clip.channel || '');
-    setTopic(clip.topic || 'Other');
-    setNote(clip.note || '');
+    setTopic(clip.topic || "Other");
+    setCustomTopicDraft("");
+    setNote(clip.note || "");
     const sMin = Math.floor((clip.startTime || 0) / 60);
     const sSec = (clip.startTime || 0) % 60;
     const eMin = Math.floor((clip.endTime || 0) / 60);
@@ -457,20 +334,12 @@ export default function CuratdMVP() {
     }
   };
 
-  const formatDuration = (start: number, end: number) => {
-    if (!end) return '';
-    const diff = Math.max(0, end - start);
-    const m = Math.floor(diff / 60);
-    const s = diff % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
-
   const usedTopics = [...new Set(clips.map(c => c.topic).filter(Boolean))];
-  const filtered = showSaved
-    ? clips.filter((c) => savedClips.includes(c.id))
-    : activeFilter === 'All'
-      ? clips
-      : [];
+  const filtered = (() => {
+    const bySaved = showSaved ? clips.filter((c) => savedClips.includes(c.id)) : clips;
+    if (selectedTopic === "All") return bySaved;
+    return bySaved.filter((c) => c.topic === selectedTopic);
+  })();
   const previewId = extractVideoId(url);
 
   return (
@@ -531,7 +400,10 @@ export default function CuratdMVP() {
       <aside className="w-14 border-r border-zinc-800 flex flex-col items-center py-4 gap-3 shrink-0">
         <button
           type="button"
-          onClick={() => { setActiveFilter('All'); setPlayingClip(null); }}
+          onClick={() => {
+            setShowSaved(false);
+            setPlayingClip(null);
+          }}
           className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center hover:bg-emerald-500/20 transition-colors"
           aria-label="CURATD Home"
           title="Home"
@@ -544,9 +416,12 @@ export default function CuratdMVP() {
         <div className="flex-1 flex flex-col items-center gap-2 pt-2">
           <button
             type="button"
-            onClick={() => setActiveFilter('All')}
+            onClick={() => {
+              setShowSaved(false);
+              setPlayingClip(null);
+            }}
             className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-colors ${
-              activeFilter === 'All'
+              !showSaved
                 ? 'bg-zinc-900 border-zinc-700 text-white'
                 : 'bg-black border-transparent text-zinc-500 hover:text-white hover:bg-zinc-900/60'
             }`}
@@ -554,15 +429,6 @@ export default function CuratdMVP() {
             title="Home"
           >
             <span className="text-lg leading-none">⌂</span>
-          </button>
-
-          <button
-            type="button"
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900/60 transition-colors"
-            aria-label="Search"
-            title="Search"
-          >
-            <span className="text-lg leading-none">⌕</span>
           </button>
 
           <button
@@ -581,15 +447,6 @@ export default function CuratdMVP() {
           >
             <span className="text-lg leading-none">＋</span>
           </button>
-
-          <button
-            type="button"
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900/60 transition-colors"
-            aria-label="Notifications"
-            title="Notifications"
-          >
-            <span className="text-lg leading-none">⦿</span>
-          </button>
         </div>
       </aside>
 
@@ -600,21 +457,31 @@ export default function CuratdMVP() {
           <section>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-white">Your Topics</h3>
-              <button type="button" className="text-xs text-zinc-500 hover:text-white transition-colors">
-                Edit
-              </button>
             </div>
             <div className="flex gap-2 flex-wrap mt-3">
+              <button
+                type="button"
+                onClick={() => setSelectedTopic("All")}
+                className={`text-[11px] px-3 py-1 rounded-full transition-colors ${
+                  selectedTopic === "All" ? "bg-white text-black" : "bg-zinc-900 text-zinc-400 border border-zinc-700"
+                }`}
+              >
+                All
+              </button>
               {usedTopics.length === 0 ? (
-                <span className="text-xs text-zinc-500">No topics yet</span>
+                <span className="text-xs text-zinc-500 self-center">No topics yet</span>
               ) : (
                 usedTopics.map((t) => (
-                  <span
+                  <button
                     key={t}
-                    className="text-[11px] px-3 py-1 rounded-full bg-black text-zinc-300 border border-zinc-700/70"
+                    type="button"
+                    onClick={() => setSelectedTopic(t)}
+                    className={`text-[11px] px-3 py-1 rounded-full transition-colors ${
+                      selectedTopic === t ? "bg-white text-black" : "bg-zinc-900 text-zinc-400 border border-zinc-700"
+                    }`}
                   >
                     {t}
-                  </span>
+                  </button>
                 ))
               )}
             </div>
@@ -625,8 +492,11 @@ export default function CuratdMVP() {
             <button
               type="button"
               onClick={() => {
+                if (user == null) {
+                  setShowAuthModal(true);
+                  return;
+                }
                 setShowSaved(true);
-                setActiveFilter('All');
               }}
               className={`w-full flex items-center justify-between rounded-xl border px-3 py-3 transition-colors ${
                 showSaved
@@ -651,114 +521,23 @@ export default function CuratdMVP() {
               </button>
             )}
           </section>
-
-          {/* Recommended Topics */}
-          <section>
-            <h3 className="text-sm font-semibold text-white">Recommended Topics</h3>
-            <div className="flex gap-2 flex-wrap mt-3">
-              {['Psychology', 'History', 'Science', 'Design', 'Fitness', 'Philosophy'].map((t) => (
-                <span
-                  key={t}
-                  className="text-[11px] px-3 py-1 rounded-full bg-black text-zinc-300 border border-zinc-700/70"
-                >
-                  {t}
-                </span>
-              ))}
-            </div>
-          </section>
-
-          {/* Who to Follow */}
-          <section>
-            <h3 className="text-sm font-semibold text-white">Who to Follow</h3>
-            <div className="mt-3 space-y-3">
-              {[
-                { initials: 'RD', name: 'Rhea Desai', handle: '@rheadoes', clips: 128, color: 'bg-violet-500/20 text-violet-200 border-violet-500/30' },
-                { initials: 'AK', name: 'Arjun Kulkarni', handle: '@arjunk', clips: 74, color: 'bg-cyan-500/20 text-cyan-200 border-cyan-500/30' },
-                { initials: 'JS', name: 'Jade Stone', handle: '@jadestone', clips: 212, color: 'bg-amber-500/20 text-amber-200 border-amber-500/30' },
-              ].map((u) => (
-                <div key={u.handle} className="flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-full border flex items-center justify-center text-xs font-bold ${u.color}`}>
-                    {u.initials}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs font-semibold text-white truncate">{u.name}</div>
-                    <div className="text-[11px] text-zinc-500 truncate">
-                      {u.handle} · {u.clips} clips
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="text-[11px] px-3 py-1.5 rounded-full border border-emerald-500 text-emerald-500 hover:bg-emerald-500/10 transition-colors"
-                  >
-                    Follow
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* Top Curators */}
-          <section>
-            <h3 className="text-sm font-semibold text-white">Top Curators This Week</h3>
-            <ol className="mt-3 space-y-2">
-              {[
-                { name: 'Nora', saves: 642 },
-                { name: 'Dev', saves: 511 },
-                { name: 'Sana', saves: 476 },
-              ].map((u, idx) => (
-                <li key={u.name} className="flex items-center justify-between text-xs">
-                  <div className="text-zinc-300">
-                    <span className="text-zinc-500 mr-2">{idx + 1}.</span>
-                    {u.name}
-                  </div>
-                  <div className="text-zinc-500">{u.saves} saves</div>
-                </li>
-              ))}
-            </ol>
-          </section>
         </div>
       </aside>
 
       {/* Main content */}
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-6 py-6">
-          {/* Tabs */}
-          <div className="flex items-center gap-5 border-b border-zinc-800 pb-4">
-            {[
-              { key: 'Following', label: 'Following', value: 'Following' },
-              { key: 'For You', label: 'For You', value: 'All' },
-              { key: 'Topics', label: 'Topics', value: 'Topics' },
-              { key: 'Popular', label: 'Popular', value: 'Popular' },
-            ].map((t) => {
-              const isActive = (t.value === 'All' && activeFilter === 'All') || activeFilter === t.value;
-              return (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setActiveFilter(t.value)}
-                  className={`text-sm font-semibold transition-colors ${
-                    isActive
-                      ? 'text-emerald-500'
-                      : 'text-zinc-500 hover:text-white'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              );
-            })}
-          </div>
-
           {/* Feed */}
-          <div className="mt-6 space-y-4 pb-20">
-            {activeFilter !== 'All' ? (
-              <div className="text-zinc-500 text-sm py-16 text-center border border-zinc-800 rounded-2xl bg-zinc-900/20">
-                This tab is a placeholder. Switch to <span className="text-emerald-500 font-semibold">For You</span> to see all clips.
-              </div>
-            ) : filtered.length === 0 ? (
+          <div className="space-y-4 pb-20">
+            {clips.length === 0 ? (
               <div className="text-center py-20">
                 <div className="text-5xl mb-4 opacity-20">▶</div>
                 <p className="text-zinc-500 text-lg font-medium">No clips yet</p>
                 <p className="text-zinc-600 text-sm mt-1">Hit the + Add icon to start curating</p>
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <p className="text-zinc-500">No clips in {selectedTopic} yet</p>
               </div>
             ) : (
               filtered.map((clip, idx) => {
@@ -878,9 +657,6 @@ export default function CuratdMVP() {
                           <span className="text-[11px] font-mono font-semibold bg-emerald-500 text-white px-2.5 py-1 rounded-md">
                             {clip.endTime ? `${clip.displayStart} — ${clip.displayEnd}` : 'Full video'}
                           </span>
-                          <span className="text-xs text-zinc-500">
-                            {Math.max(1, 7 + (idx % 9))} users clipped
-                          </span>
                         </div>
 
                         <div className="flex items-center gap-3">
@@ -888,7 +664,7 @@ export default function CuratdMVP() {
                             type="button"
                             onClick={async () => {
                               if (!user) {
-                                void signIn();
+                                setShowAuthModal(true);
                                 return;
                               }
                               try {
@@ -928,42 +704,7 @@ export default function CuratdMVP() {
         </div>
       </main>
 
-      {/* ── Sign in to curate (guests only) ── */}
-      {showAuthModal && (
-        <div
-          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => closeAuthModal()}
-        >
-          <div
-            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-lg p-8 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-4 mb-6">
-              <div>
-                <h2 className="text-xl font-bold text-white">Sign in to start curating</h2>
-                <p className="text-zinc-500 text-sm mt-2 leading-relaxed">
-                  Create your own collection of YouTube&apos;s best moments.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => closeAuthModal()}
-                className="text-zinc-500 hover:text-white text-2xl leading-none transition-colors shrink-0"
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => void signInWithGoogle()}
-              className="w-full font-bold py-4 rounded-xl transition-all text-sm bg-white text-black hover:bg-zinc-200"
-            >
-              Sign in with Google
-            </button>
-          </div>
-        </div>
-      )}
+      <SignInCuratorModal open={showAuthModal} onClose={closeAuthModal} />
 
       {/* ── ADD/EDIT MODAL ── */}
       {showForm && (
@@ -1053,19 +794,54 @@ export default function CuratdMVP() {
               <div>
                 <label className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-2 block">Topic</label>
                 <div className="flex flex-wrap gap-2">
-                  {TOPICS.map(t => (
+                  {TOPICS.map((t) => (
                     <button
                       key={t}
+                      type="button"
                       onClick={() => setTopic(t)}
                       className={`text-xs px-3.5 py-1.5 rounded-full transition-all ${
                         topic === t
-                          ? 'bg-white text-black font-semibold'
-                          : 'bg-zinc-800 text-zinc-500 hover:text-white border border-zinc-700/50'
+                          ? "bg-white text-black font-semibold"
+                          : "bg-zinc-800 text-zinc-500 hover:text-white border border-zinc-700/50"
                       }`}
                     >
                       {t}
                     </button>
                   ))}
+                  {topic && !TOPICS.includes(topic) ? (
+                    <button
+                      type="button"
+                      onClick={() => setTopic(topic)}
+                      className="text-xs px-3.5 py-1.5 rounded-full bg-white font-semibold text-black"
+                    >
+                      {topic}
+                    </button>
+                  ) : null}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <input
+                    type="text"
+                    value={customTopicDraft}
+                    onChange={(e) => setCustomTopicDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        applyCustomTopic();
+                      }
+                    }}
+                    placeholder="Add new topic"
+                    className="min-w-0 flex-1 rounded-full border border-zinc-700 bg-zinc-900 px-3.5 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-zinc-500"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => applyCustomTopic()}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-600 bg-zinc-800 text-lg font-semibold text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-700 hover:text-white"
+                    aria-label="Add new topic"
+                    title="Add topic"
+                  >
+                    +
+                  </button>
                 </div>
               </div>
 
