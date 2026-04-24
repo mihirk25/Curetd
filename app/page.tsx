@@ -1,8 +1,8 @@
 "use client";
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { db } from '../firebase'; 
-import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, onSnapshot, setDoc } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, onSnapshot, setDoc, where, limit } from "firebase/firestore";
 import { useAuth } from './auth-context';
 import { UsernameSetup, useUsername } from './username-setup';
 
@@ -132,8 +132,148 @@ function extractVideoId(url: string) {
 
 const TOPICS = ["Economics", "Startups", "Stand-up", "Data", "Finance", "Tech", "Science", "Design", "History", "Fitness", "Philosophy", "Music", "Podcast", "Other"];
 
+type CuratorSearchHit = {
+  id: string;
+  username?: string;
+  displayName?: string | null;
+  photoURL?: string | null;
+};
+
+function CuratorSearchBar() {
+  const [searchText, setSearchText] = useState("");
+  const [debouncedPrefix, setDebouncedPrefix] = useState("");
+  const [open, setOpen] = useState(false);
+  const [hits, setHits] = useState<CuratorSearchHit[]>([]);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDebouncedPrefix(searchText.trim().toLowerCase());
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [searchText]);
+
+  useEffect(() => {
+    if (!debouncedPrefix) {
+      setHits([]);
+      return;
+    }
+    const q = query(
+      collection(db, "users"),
+      where("displayNameLower", ">=", debouncedPrefix),
+      where("displayNameLower", "<=", `${debouncedPrefix}\uf8ff`),
+      orderBy("displayNameLower"),
+      limit(20),
+    );
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const rows: CuratorSearchHit[] = snap.docs
+          .map((d) => {
+            const data = d.data() as Record<string, unknown>;
+            return {
+              id: d.id,
+              username: typeof data.username === "string" ? data.username : undefined,
+              displayName: (data.displayName as string | null | undefined) ?? null,
+              photoURL: (data.photoURL as string | null | undefined) ?? null,
+            };
+          })
+          .filter((row) => row.username);
+        setHits(rows);
+      },
+      () => setHits([]),
+    );
+    return () => unsub();
+  }, [debouncedPrefix]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const el = wrapRef.current;
+      if (el && !el.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  const showDropdown = open && searchText.trim().length > 0;
+  const trimmedLower = searchText.trim().toLowerCase();
+  const pendingSync = trimmedLower !== debouncedPrefix;
+
+  return (
+    <div ref={wrapRef} className="relative w-[300px] max-w-full">
+      <div className="flex h-9 w-full items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900 px-3">
+        <span className="text-zinc-500 shrink-0" aria-hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="opacity-80">
+            <path
+              d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"
+              stroke="currentColor"
+              strokeWidth="2"
+            />
+            <path d="M16 16l4.5 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        </span>
+        <input
+          type="search"
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          onFocus={() => setOpen(true)}
+          placeholder="Search curators..."
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          className="min-w-0 flex-1 bg-transparent text-sm text-zinc-100 placeholder:text-zinc-500 outline-none"
+          aria-autocomplete="list"
+          aria-expanded={showDropdown}
+        />
+      </div>
+      {showDropdown ? (
+        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-[60] max-h-64 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950 py-1 shadow-xl">
+          {pendingSync ? (
+            <div className="px-3 py-3 text-center text-sm text-zinc-600">…</div>
+          ) : hits.length === 0 ? (
+            <div className="px-3 py-3 text-center text-sm text-zinc-500">No curators found</div>
+          ) : (
+            hits.map((h) => (
+              <Link
+                key={h.id}
+                href={`/${h.username}`}
+                onClick={() => {
+                  setOpen(false);
+                  setSearchText("");
+                  setDebouncedPrefix("");
+                }}
+                className="flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-900/90 transition-colors"
+              >
+                {h.photoURL ? (
+                  <img
+                    src={h.photoURL}
+                    alt=""
+                    className="h-9 w-9 shrink-0 rounded-full border border-zinc-700 object-cover"
+                  />
+                ) : (
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-xs font-semibold text-zinc-300">
+                    {(h.displayName || "?").slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1 text-left">
+                  <div className="truncate text-sm font-medium text-zinc-100">{h.displayName || "Anonymous"}</div>
+                  <div className="truncate text-xs text-zinc-500">@{h.username}</div>
+                </div>
+              </Link>
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function CuratdMVP() {
-  const { user, loading: authLoading, signIn, signOut: handleSignOut } = useAuth();
+  const { user, signIn, signOut: handleSignOut } = useAuth();
+  const signInWithGoogle = signIn;
   const username = useUsername();
   const [url, setUrl] = useState('');
   const [startMin, setStartMin] = useState('');
@@ -151,22 +291,60 @@ export default function CuratdMVP() {
   const [clips, setClips] = useState<any[]>([]);
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const pendingAddClipAfterAuth = useRef(false);
+  const hadAuthenticatedUser = useRef(false);
   const [activeFilter, setActiveFilter] = useState('All');
   const [playingClip, setPlayingClip] = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(collection(db, "clips"), orderBy("createdAt", "desc"));
     const unsubscribeClips = onSnapshot(q, (snapshot) => {
-      setClips(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      setClips(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
+    return () => {
+      unsubscribeClips();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setSavedClips([]);
+      return;
+    }
     const unsubscribeSaved = onSnapshot(collection(db, "savedClips"), (snapshot) => {
       setSavedClips(snapshot.docs.map((d) => d.id));
     });
     return () => {
-      unsubscribeClips();
       unsubscribeSaved();
     };
-  }, []);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (user) {
+      hadAuthenticatedUser.current = true;
+      if (!pendingAddClipAfterAuth.current) return;
+      pendingAddClipAfterAuth.current = false;
+      setShowAuthModal(false);
+      setUrl("");
+      setStartMin("");
+      setStartSec("");
+      setEndMin("");
+      setEndSec("");
+      setNote("");
+      setTitle("");
+      setChannel("");
+      setTopic("Other");
+      setEditingClipId(null);
+      setShowForm(true);
+      return;
+    }
+    if (hadAuthenticatedUser.current) {
+      hadAuthenticatedUser.current = false;
+      pendingAddClipAfterAuth.current = false;
+      setShowAuthModal(false);
+    }
+  }, [user]);
 
   const fetchVideoInfo = async (ytUrl: string) => {
     try {
@@ -184,9 +362,36 @@ export default function CuratdMVP() {
   };
 
   const resetForm = () => {
-    setUrl(''); setStartMin(''); setStartSec(''); setEndMin(''); setEndSec('');
-    setNote(''); setTitle(''); setChannel(''); setTopic('Other');
-    setEditingClipId(null); setShowForm(false);
+    setUrl("");
+    setStartMin("");
+    setStartSec("");
+    setEndMin("");
+    setEndSec("");
+    setNote("");
+    setTitle("");
+    setChannel("");
+    setTopic("Other");
+    setEditingClipId(null);
+    setShowForm(false);
+  };
+
+  const openNewClipForm = () => {
+    setUrl("");
+    setStartMin("");
+    setStartSec("");
+    setEndMin("");
+    setEndSec("");
+    setNote("");
+    setTitle("");
+    setChannel("");
+    setTopic("Other");
+    setEditingClipId(null);
+    setShowForm(true);
+  };
+
+  const closeAuthModal = () => {
+    pendingAddClipAfterAuth.current = false;
+    setShowAuthModal(false);
   };
 
   const handleSave = async () => {
@@ -221,6 +426,7 @@ export default function CuratdMVP() {
   };
 
   const handleEdit = (clip: any) => {
+    if (!user || user.uid !== clip.userId) return;
     setUrl(clip.url || '');
     setTitle(clip.title || '');
     setChannel(clip.channel || '');
@@ -240,8 +446,15 @@ export default function CuratdMVP() {
   };
 
   const handleDelete = async (clipId: string) => {
+    if (!user) return;
+    const clip = clips.find((c) => c.id === clipId);
+    if (!clip || user.uid !== clip.userId) return;
     if (!confirm("Delete this clip?")) return;
-    try { await deleteDoc(doc(db, "clips", clipId)); } catch (e) { alert("Error deleting."); }
+    try {
+      await deleteDoc(doc(db, "clips", clipId));
+    } catch (e) {
+      alert("Error deleting.");
+    }
   };
 
   const formatDuration = (start: number, end: number) => {
@@ -261,10 +474,61 @@ export default function CuratdMVP() {
   const previewId = extractVideoId(url);
 
   return (
-    <div className="h-screen bg-black text-white font-sans flex">
+    <div className="h-screen bg-black text-white font-sans flex flex-col">
       <UsernameSetup />
+      <header className="shrink-0 h-14 border-b border-zinc-800 grid grid-cols-[minmax(0,auto)_1fr_minmax(0,auto)] items-center gap-4 px-4 bg-black">
+        <Link href="/" className="text-sm font-bold tracking-tight text-white hover:text-zinc-200 transition-colors shrink-0">
+          CURATD
+        </Link>
+        <div className="flex min-w-0 justify-center px-2">
+          <CuratorSearchBar />
+        </div>
+        <div className="flex items-center gap-3 min-w-0 justify-self-end">
+          {user ? (
+            <>
+              <Link
+                href={username ? `/${username}` : "/"}
+                className="flex items-center gap-2 min-w-0 rounded-xl px-2 py-1.5 hover:bg-zinc-900/80 transition-colors"
+                title={user.displayName || "Your library"}
+              >
+                {user.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt=""
+                    className="w-8 h-8 rounded-full object-cover border border-zinc-700 shrink-0"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center text-black text-xs font-bold shrink-0">
+                    {(user.displayName || "U").slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <span className="text-sm font-medium text-zinc-100 truncate max-w-[160px] sm:max-w-[220px]">
+                  {user.displayName || "Account"}
+                </span>
+              </Link>
+              <button
+                type="button"
+                onClick={() => void handleSignOut()}
+                className="text-xs text-zinc-500 hover:text-red-400 px-2 py-1.5 rounded-lg hover:bg-zinc-900 transition-colors shrink-0"
+              >
+                Sign out
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void signIn()}
+              className="text-sm font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-zinc-200 transition-colors"
+            >
+              Sign In
+            </button>
+          )}
+        </div>
+      </header>
+
+      <div className="flex flex-1 min-h-0">
       {/* Left icon sidebar */}
-      <aside className="w-14 border-r border-zinc-800 flex flex-col items-center py-4 gap-3">
+      <aside className="w-14 border-r border-zinc-800 flex flex-col items-center py-4 gap-3 shrink-0">
         <button
           type="button"
           onClick={() => { setActiveFilter('All'); setPlayingClip(null); }}
@@ -292,54 +556,6 @@ export default function CuratdMVP() {
             <span className="text-lg leading-none">⌂</span>
           </button>
 
-          {!user ? (
-            <button
-              type="button"
-              onClick={() => {
-                if (authLoading) return;
-                return void signIn();
-              }}
-              className="w-10 h-10 rounded-xl flex items-center justify-center bg-black hover:bg-zinc-900/60 transition-colors"
-              aria-label="Sign in"
-              title="Sign in"
-            >
-              <div className="w-7 h-7 rounded-full border border-zinc-700 flex items-center justify-center text-zinc-300 text-sm font-semibold">
-                →
-              </div>
-            </button>
-          ) : (
-            <div className="flex flex-col items-center gap-1">
-              <Link
-                href={username ? `/${username}` : "/"}
-                className="w-10 h-10 rounded-xl flex items-center justify-center bg-black hover:bg-zinc-900/60 transition-colors"
-                aria-label="View my library"
-                title={user.displayName || "View my library"}
-              >
-                {user.photoURL ? (
-                  <img
-                    src={user.photoURL}
-                    alt={user.displayName || "User"}
-                    className="w-7 h-7 rounded-full object-cover border border-zinc-800"
-                  />
-                ) : (
-                  <div className="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center text-black text-xs font-bold">
-                    {(user.displayName || "U").slice(0, 1).toUpperCase()}
-                  </div>
-                )}
-              </Link>
-
-              <button
-                type="button"
-                onClick={() => void handleSignOut()}
-                className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:text-red-400 hover:bg-zinc-900/60 transition-colors"
-                aria-label="Sign out"
-                title="Sign out"
-              >
-                <span className="text-[10px] leading-none">⏻</span>
-              </button>
-            </div>
-          )}
-
           <button
             type="button"
             className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900/60 transition-colors"
@@ -351,10 +567,17 @@ export default function CuratdMVP() {
 
           <button
             type="button"
-            onClick={() => { resetForm(); setShowForm(true); }}
+            onClick={() => {
+              if (user == null) {
+                pendingAddClipAfterAuth.current = true;
+                setShowAuthModal(true);
+                return;
+              }
+              openNewClipForm();
+            }}
             className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900/60 transition-colors"
-            aria-label="Add"
-            title="Add"
+            aria-label="Add clip"
+            title="Add clip"
           >
             <span className="text-lg leading-none">＋</span>
           </button>
@@ -609,6 +832,19 @@ export default function CuratdMVP() {
                           <div className="text-sm text-zinc-500 mt-1 truncate">
                             {clip.channel || 'Unknown channel'}
                           </div>
+                          <div className="flex flex-wrap items-center gap-2 mt-2">
+                            {clip.topic ? (
+                              <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-zinc-800 text-zinc-200 border border-zinc-700/80">
+                                {clip.topic}
+                              </span>
+                            ) : null}
+                            <span className="text-xs text-zinc-500">
+                              Curated by{" "}
+                              <span className="text-zinc-300 font-medium">
+                                {clip.userDisplayName || "Unknown curator"}
+                              </span>
+                            </span>
+                          </div>
                           {clip.note ? (
                             <div className="text-base text-zinc-100 font-medium italic border-l-2 border-emerald-500 pl-3 mt-2 line-clamp-3">
                               &ldquo;{clip.note}&rdquo;
@@ -617,7 +853,7 @@ export default function CuratdMVP() {
                         </div>
 
                         {/* Hover actions */}
-                        {user?.uid === clip.userId ? (
+                        {user && clip.userId && user.uid === clip.userId ? (
                           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
                               type="button"
@@ -651,6 +887,10 @@ export default function CuratdMVP() {
                           <button
                             type="button"
                             onClick={async () => {
+                              if (!user) {
+                                void signIn();
+                                return;
+                              }
                               try {
                                 if (isSaved) {
                                   await deleteDoc(doc(db, "savedClips", clip.id));
@@ -687,6 +927,43 @@ export default function CuratdMVP() {
           </div>
         </div>
       </main>
+
+      {/* ── Sign in to curate (guests only) ── */}
+      {showAuthModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => closeAuthModal()}
+        >
+          <div
+            className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-lg p-8 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-xl font-bold text-white">Sign in to start curating</h2>
+                <p className="text-zinc-500 text-sm mt-2 leading-relaxed">
+                  Create your own collection of YouTube&apos;s best moments.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => closeAuthModal()}
+                className="text-zinc-500 hover:text-white text-2xl leading-none transition-colors shrink-0"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => void signInWithGoogle()}
+              className="w-full font-bold py-4 rounded-xl transition-all text-sm bg-white text-black hover:bg-zinc-200"
+            >
+              Sign in with Google
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── ADD/EDIT MODAL ── */}
       {showForm && (
@@ -807,6 +1084,7 @@ export default function CuratdMVP() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

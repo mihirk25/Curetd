@@ -5,6 +5,7 @@ import {
   doc,
   getDoc,
   serverTimestamp,
+  updateDoc,
   writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase";
@@ -56,6 +57,12 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
         if (existing) {
           setUsername(existing);
           setOpen(false);
+          const dn = u?.displayName ?? user.displayName ?? null;
+          if (dn != null && u?.displayNameLower == null) {
+            updateDoc(userRef, {
+              displayNameLower: String(dn).toLowerCase(),
+            }).catch(() => {});
+          }
         } else {
           setUsername(null);
           setOpen(true);
@@ -100,9 +107,11 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
       }
 
       const batch = writeBatch(db);
+      const displayName = user.displayName ?? null;
       batch.set(doc(db, "users", user.uid), {
         username: normalized,
-        displayName: user.displayName,
+        displayName,
+        displayNameLower: (displayName ?? "").toLowerCase(),
         photoURL: user.photoURL,
         createdAt: serverTimestamp(),
       });
