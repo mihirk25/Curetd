@@ -390,6 +390,24 @@ export default function CuratdMVP() {
       return typeof t === "string" && t.toLowerCase().includes(q);
     });
   }, [clips, showSaved, savedClips, topicSearch]);
+
+  const topTopics = useMemo(() => {
+    const source = showSaved ? clips.filter((c) => savedClips.includes(c.id)) : clips;
+    const counts = new Map<string, { label: string; count: number }>();
+    for (const c of source) {
+      const raw = c?.topic;
+      if (typeof raw !== "string") continue;
+      const label = raw.trim();
+      if (!label) continue;
+      const key = label.toLowerCase();
+      const prev = counts.get(key);
+      if (prev) prev.count += 1;
+      else counts.set(key, { label, count: 1 });
+    }
+    return [...counts.values()]
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+      .slice(0, 5);
+  }, [clips, showSaved, savedClips]);
   const previewId = extractVideoId(url);
 
   return (
@@ -451,9 +469,7 @@ export default function CuratdMVP() {
         <button
           type="button"
           onClick={() => {
-            setShowSaved(false);
-            setTopicSearch("");
-            setPlayingClip(null);
+            window.location.reload();
           }}
           className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center hover:bg-emerald-500/20 transition-colors"
           aria-label="CURATD Home"
@@ -465,24 +481,6 @@ export default function CuratdMVP() {
         </button>
 
         <div className="flex-1 flex flex-col items-center gap-2 pt-2">
-          <button
-            type="button"
-            onClick={() => {
-              setShowSaved(false);
-              setTopicSearch("");
-              setPlayingClip(null);
-            }}
-            className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-colors ${
-              !showSaved
-                ? 'bg-zinc-900 border-zinc-700 text-white'
-                : 'bg-black border-transparent text-zinc-500 hover:text-white hover:bg-zinc-900/60'
-            }`}
-            aria-label="Home"
-            title="Home"
-          >
-            <span className="text-lg leading-none">⌂</span>
-          </button>
-
           <button
             type="button"
             onClick={() => {
@@ -539,6 +537,34 @@ export default function CuratdMVP() {
                   className="w-full rounded-full border border-zinc-700 bg-zinc-900 py-2 pl-8 pr-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-zinc-500"
                 />
               </div>
+
+              {topTopics.length > 0 ? (
+                <div className="mt-2">
+                  <div className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-2">
+                    Top topics
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {topTopics.map((t) => {
+                      const active = topicSearch.trim().toLowerCase() === t.label.toLowerCase();
+                      return (
+                        <button
+                          key={t.label.toLowerCase()}
+                          type="button"
+                          onClick={() => setTopicSearch(t.label)}
+                          className={`text-[11px] px-3 py-1 rounded-full transition-colors ${
+                            active
+                              ? "bg-white text-black font-semibold"
+                              : "bg-zinc-900 text-zinc-400 border border-zinc-700 hover:text-zinc-200 hover:border-zinc-600"
+                          }`}
+                          title={`${t.count} clips`}
+                        >
+                          {t.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </section>
 
