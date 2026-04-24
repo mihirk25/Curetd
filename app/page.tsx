@@ -1,7 +1,119 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import Link from "next/link";
 import { db } from '../firebase'; 
-import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy, onSnapshot, setDoc } from 'firebase/firestore';
+import { useAuth } from './auth-context';
+import { UsernameSetup, useUsername } from './username-setup';
+
+declare global {
+  interface Window {
+    YT?: any;
+    onYouTubeIframeAPIReady?: () => void;
+  }
+}
+
+function loadYouTubeIframeAPI(): Promise<any> {
+  if (typeof window === 'undefined') return Promise.resolve(null);
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+
+  return new Promise((resolve) => {
+    const existing = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
+    if (!existing) {
+      const tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      document.head.appendChild(tag);
+    }
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      prev?.();
+      resolve(window.YT);
+    };
+  });
+}
+
+function ClipYouTubePlayer({
+  videoId,
+  startTime,
+  endTime,
+}: {
+  videoId: string;
+  startTime: number;
+  endTime?: number;
+}) {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const playerRef = useRef<any>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const YT = await loadYouTubeIframeAPI();
+      if (cancelled || !YT?.Player || !wrapperRef.current) return;
+
+      // Create a mount node outside of React's VDOM control.
+      // The YT IFrame API replaces the element you pass in; we do that on an
+      // imperatively-created child to avoid React removeChild mismatches.
+      const mount = document.createElement('div');
+      mount.style.width = '100%';
+      mount.style.height = '100%';
+      wrapperRef.current.appendChild(mount);
+      mountRef.current = mount;
+
+      playerRef.current = new YT.Player(mount, {
+        videoId,
+        playerVars: {
+          autoplay: 1,
+          start: startTime || 0,
+          ...(endTime ? { end: endTime } : {}),
+          rel: 0,
+          iv_load_policy: 3,
+        },
+        events: {
+          onReady: (e: any) => {
+            try {
+              e?.target?.seekTo(startTime || 0, true);
+              e?.target?.playVideo?.();
+            } catch {}
+          },
+          onStateChange: (event: any) => {
+            try {
+              // 0 = ENDED
+              if (event?.data === 0) {
+                event?.target?.seekTo(startTime || 0, true);
+                event?.target?.pauseVideo?.();
+              }
+              // Also guard against replay-from-0 behavior
+              if (event?.data === 1) {
+                const t = event?.target?.getCurrentTime?.() ?? 0;
+                if ((startTime || 0) > 0 && t < (startTime || 0) - 0.25) {
+                  event?.target?.seekTo(startTime || 0, true);
+                }
+              }
+            } catch {}
+          },
+        },
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      try {
+        playerRef.current?.destroy?.();
+      } catch {}
+      playerRef.current = null;
+      try {
+        if (mountRef.current?.parentNode) {
+          mountRef.current.parentNode.removeChild(mountRef.current);
+        }
+      } catch {}
+      mountRef.current = null;
+    };
+  }, [videoId, startTime, endTime]);
+
+  return <div ref={wrapperRef} className="absolute inset-0 w-full h-full" />;
+}
 
 function extractVideoId(url: string) {
   if (!url) return null;
@@ -21,6 +133,8 @@ function extractVideoId(url: string) {
 const TOPICS = ["Economics", "Startups", "Stand-up", "Data", "Finance", "Tech", "Science", "Design", "History", "Fitness", "Philosophy", "Music", "Podcast", "Other"];
 
 export default function CuratdMVP() {
+  const { user, loading: authLoading, signIn, signOut: handleSignOut } = useAuth();
+  const username = useUsername();
   const [url, setUrl] = useState('');
   const [startMin, setStartMin] = useState('');
   const [startSec, setStartSec] = useState('');
@@ -31,6 +145,9 @@ export default function CuratdMVP() {
   const [channel, setChannel] = useState('');
   const [topic, setTopic] = useState('Other');
   const [loading, setLoading] = useState(false);
+  const [fetchingInfo, setFetchingInfo] = useState(false);
+  const [savedClips, setSavedClips] = useState<string[]>([]);
+  const [showSaved, setShowSaved] = useState(false);
   const [clips, setClips] = useState<any[]>([]);
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -39,11 +156,32 @@ export default function CuratdMVP() {
 
   useEffect(() => {
     const q = query(collection(db, "clips"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribeClips = onSnapshot(q, (snapshot) => {
       setClips(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
     });
-    return () => unsubscribe();
+    const unsubscribeSaved = onSnapshot(collection(db, "savedClips"), (snapshot) => {
+      setSavedClips(snapshot.docs.map((d) => d.id));
+    });
+    return () => {
+      unsubscribeClips();
+      unsubscribeSaved();
+    };
   }, []);
+
+  const fetchVideoInfo = async (ytUrl: string) => {
+    try {
+      setFetchingInfo(true);
+      const res = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(ytUrl)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.title) setTitle((prev) => (prev ? prev : data.title));
+      if (data?.author_name) setChannel((prev) => (prev ? prev : data.author_name));
+    } catch (e) {
+      // silent: user can type manually
+    } finally {
+      setFetchingInfo(false);
+    }
+  };
 
   const resetForm = () => {
     setUrl(''); setStartMin(''); setStartSec(''); setEndMin(''); setEndSec('');
@@ -52,6 +190,7 @@ export default function CuratdMVP() {
   };
 
   const handleSave = async () => {
+    if (!user) return alert("Please sign in to save clips");
     if (!url) return alert("Please paste a YouTube URL");
     if (!title) return alert("Please add a title");
     const totalStart = (parseInt(startMin) || 0) * 60 + (parseInt(startSec) || 0);
@@ -62,6 +201,8 @@ export default function CuratdMVP() {
     try {
       const clipData = {
         url, videoId, title, channel, topic,
+        userId: user.uid,
+        userDisplayName: user.displayName || 'Anonymous',
         startTime: totalStart, endTime: totalEnd,
         displayStart: `${startMin || 0}:${(startSec || '00').toString().padStart(2, '0')}`,
         displayEnd: `${endMin || 0}:${(endSec || '00').toString().padStart(2, '0')}`,
@@ -112,11 +253,16 @@ export default function CuratdMVP() {
   };
 
   const usedTopics = [...new Set(clips.map(c => c.topic).filter(Boolean))];
-  const filtered = activeFilter === 'All' ? clips : [];
+  const filtered = showSaved
+    ? clips.filter((c) => savedClips.includes(c.id))
+    : activeFilter === 'All'
+      ? clips
+      : [];
   const previewId = extractVideoId(url);
 
   return (
     <div className="h-screen bg-black text-white font-sans flex">
+      <UsernameSetup />
       {/* Left icon sidebar */}
       <aside className="w-14 border-r border-zinc-800 flex flex-col items-center py-4 gap-3">
         <button
@@ -146,16 +292,53 @@ export default function CuratdMVP() {
             <span className="text-lg leading-none">⌂</span>
           </button>
 
-          <button
-            type="button"
-            className="w-10 h-10 rounded-xl flex items-center justify-center bg-black hover:bg-zinc-900/60 transition-colors"
-            aria-label="Profile"
-            title="Profile"
-          >
-            <div className="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center text-black text-xs font-bold">
-              M
+          {!user ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (authLoading) return;
+                return void signIn();
+              }}
+              className="w-10 h-10 rounded-xl flex items-center justify-center bg-black hover:bg-zinc-900/60 transition-colors"
+              aria-label="Sign in"
+              title="Sign in"
+            >
+              <div className="w-7 h-7 rounded-full border border-zinc-700 flex items-center justify-center text-zinc-300 text-sm font-semibold">
+                →
+              </div>
+            </button>
+          ) : (
+            <div className="flex flex-col items-center gap-1">
+              <Link
+                href={username ? `/${username}` : "/"}
+                className="w-10 h-10 rounded-xl flex items-center justify-center bg-black hover:bg-zinc-900/60 transition-colors"
+                aria-label="View my library"
+                title={user.displayName || "View my library"}
+              >
+                {user.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName || "User"}
+                    className="w-7 h-7 rounded-full object-cover border border-zinc-800"
+                  />
+                ) : (
+                  <div className="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center text-black text-xs font-bold">
+                    {(user.displayName || "U").slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+              </Link>
+
+              <button
+                type="button"
+                onClick={() => void handleSignOut()}
+                className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-600 hover:text-red-400 hover:bg-zinc-900/60 transition-colors"
+                aria-label="Sign out"
+                title="Sign out"
+              >
+                <span className="text-[10px] leading-none">⏻</span>
+              </button>
             </div>
-          </button>
+          )}
 
           <button
             type="button"
@@ -212,6 +395,38 @@ export default function CuratdMVP() {
                 ))
               )}
             </div>
+          </section>
+
+          {/* Saved Clips */}
+          <section>
+            <button
+              type="button"
+              onClick={() => {
+                setShowSaved(true);
+                setActiveFilter('All');
+              }}
+              className={`w-full flex items-center justify-between rounded-xl border px-3 py-3 transition-colors ${
+                showSaved
+                  ? 'border-emerald-500/40 bg-emerald-500/10'
+                  : 'border-zinc-800 bg-zinc-900/20 hover:bg-zinc-900/40'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm">🔖</span>
+                <h3 className="text-sm font-semibold text-white">Saved Clips</h3>
+                <span className="text-xs text-zinc-500">({savedClips.length})</span>
+              </div>
+              <span className="text-xs text-zinc-500">View</span>
+            </button>
+            {showSaved && (
+              <button
+                type="button"
+                onClick={() => setShowSaved(false)}
+                className="mt-2 text-xs text-zinc-500 hover:text-white transition-colors"
+              >
+                Show All
+              </button>
+            )}
           </section>
 
           {/* Recommended Topics */}
@@ -326,9 +541,7 @@ export default function CuratdMVP() {
               filtered.map((clip, idx) => {
                 const vid = clip.videoId || extractVideoId(clip.url);
                 const isPlaying = playingClip === clip.id;
-                const embedUrl = vid
-                  ? `https://www.youtube.com/embed/${vid}?start=${clip.startTime || 0}${clip.endTime ? `&end=${clip.endTime}` : ''}&autoplay=1&rel=0`
-                  : '';
+                const isSaved = savedClips.includes(clip.id);
 
                 return (
                   <div
@@ -351,13 +564,10 @@ export default function CuratdMVP() {
                     >
                       <div className="relative aspect-video w-full bg-zinc-950 border-b border-zinc-800 rounded-t-2xl overflow-hidden">
                         {isPlaying && vid ? (
-                          <iframe
-                            width="100%"
-                            height="100%"
-                            src={embedUrl}
-                            frameBorder="0"
-                            allowFullScreen
-                            className="absolute inset-0 w-full h-full"
+                          <ClipYouTubePlayer
+                            videoId={vid}
+                            startTime={clip.startTime || 0}
+                            endTime={clip.endTime || undefined}
                           />
                         ) : (
                           <>
@@ -400,29 +610,31 @@ export default function CuratdMVP() {
                             {clip.channel || 'Unknown channel'}
                           </div>
                           {clip.note ? (
-                            <div className="text-sm text-zinc-400 mt-3 italic line-clamp-3">
+                            <div className="text-base text-zinc-100 font-medium italic border-l-2 border-emerald-500 pl-3 mt-2 line-clamp-3">
                               &ldquo;{clip.note}&rdquo;
                             </div>
                           ) : null}
                         </div>
 
                         {/* Hover actions */}
-                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            type="button"
-                            onClick={() => handleEdit(clip)}
-                            className="text-[11px] text-zinc-400 hover:text-white px-2.5 py-1 rounded-md hover:bg-zinc-800 transition-colors"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(clip.id)}
-                            className="text-[11px] text-zinc-400 hover:text-red-400 px-2.5 py-1 rounded-md hover:bg-zinc-800 transition-colors"
-                          >
-                            Delete
-                          </button>
-                        </div>
+                        {user?.uid === clip.userId ? (
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={() => handleEdit(clip)}
+                              className="text-[11px] text-zinc-400 hover:text-white px-2.5 py-1 rounded-md hover:bg-zinc-800 transition-colors"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(clip.id)}
+                              className="text-[11px] text-zinc-400 hover:text-red-400 px-2.5 py-1 rounded-md hover:bg-zinc-800 transition-colors"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        ) : null}
                       </div>
 
                       <div className="flex flex-wrap items-center justify-between gap-3 mt-5 pt-4 border-t border-zinc-800/70">
@@ -438,15 +650,28 @@ export default function CuratdMVP() {
                         <div className="flex items-center gap-3">
                           <button
                             type="button"
+                            onClick={async () => {
+                              try {
+                                if (isSaved) {
+                                  await deleteDoc(doc(db, "savedClips", clip.id));
+                                } else {
+                                  await setDoc(doc(db, "savedClips", clip.id), { clipId: clip.id, savedAt: serverTimestamp() });
+                                }
+                              } catch (e) {
+                                // silent
+                              }
+                            }}
                             className="text-xs px-3 py-1.5 rounded-full border border-zinc-700 text-zinc-300 hover:bg-zinc-800/60 transition-colors"
                           >
-                            Save
+                            <span className={isSaved ? "text-emerald-500 font-semibold" : undefined}>
+                              {isSaved ? "Saved ✓" : "Save"}
+                            </span>
                           </button>
                           <button
                             type="button"
                             onClick={() => {
                               if (!vid) return;
-                              setPlayingClip(clip.id);
+                              window.open(`https://www.youtube.com/watch?v=${vid}&t=${clip.startTime || 0}s`, '_blank');
                             }}
                             className="text-xs font-semibold text-emerald-500 hover:text-emerald-400 transition-colors"
                           >
@@ -483,8 +708,18 @@ export default function CuratdMVP() {
                 <input
                   type="text" value={url} placeholder="https://youtube.com/watch?v=..."
                   className="w-full bg-black border border-zinc-700 p-3.5 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
-                  onChange={(e) => setUrl(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setUrl(next);
+                    const looksLikeYoutube = next.includes("youtube.com") || next.includes("youtu.be");
+                    if (looksLikeYoutube && (!title.trim() || !channel.trim())) {
+                      fetchVideoInfo(next);
+                    }
+                  }}
                 />
+                {fetchingInfo && (
+                  <div className="text-xs text-zinc-500 mt-2">Fetching info...</div>
+                )}
                 {previewId && (
                   <img
                     src={`https://img.youtube.com/vi/${previewId}/mqdefault.jpg`}
