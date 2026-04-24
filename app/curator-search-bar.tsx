@@ -17,6 +17,7 @@ type ClipSearchHit = {
   title?: string | null;
   channel?: string | null;
   topic?: string | null;
+  note?: string | null;
   url?: string | null;
   videoId?: string | null;
   startTime?: number | null;
@@ -96,6 +97,7 @@ export function CuratorSearchBar() {
             title: (data.title as string | null | undefined) ?? null,
             channel: (data.channel as string | null | undefined) ?? null,
             topic: (data.topic as string | null | undefined) ?? null,
+            note: (data.note as string | null | undefined) ?? null,
             url: (data.url as string | null | undefined) ?? null,
             videoId: (data.videoId as string | null | undefined) ?? null,
             startTime: (data.startTime as number | null | undefined) ?? null,
@@ -133,7 +135,7 @@ export function CuratorSearchBar() {
     if (!q) return [];
     const out: ClipSearchHit[] = [];
     for (const c of recentClips) {
-      const hay = `${c.title ?? ""} ${c.channel ?? ""} ${c.topic ?? ""}`.toLowerCase();
+      const hay = `${c.title ?? ""} ${c.channel ?? ""} ${c.topic ?? ""} ${c.note ?? ""}`.toLowerCase();
       if (!hay.includes(q)) continue;
       out.push(c);
       if (out.length >= 12) break;
