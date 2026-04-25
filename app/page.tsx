@@ -1,14 +1,17 @@
 "use client";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { auth, db, storage } from "../firebase";
 import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, serverTimestamp, query, orderBy, onSnapshot, setDoc, where, limit, arrayUnion, Timestamp } from "firebase/firestore";
 import { useAuth } from "./auth-context";
 import { UsernameSetup, useUsername } from "./username-setup";
 import { CuratorSearchBar } from "./curator-search-bar";
 import { SignInCuratorModal } from "./sign-in-curator-modal";
+import { CuratorRequiredModal } from "./curator-required-modal";
 import { updateProfile } from "firebase/auth";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { useUnreadMessageCount } from "./messages/use-unread-count";
 
 declare global {
   interface Window {
@@ -136,8 +139,46 @@ function extractVideoId(url: string) {
 
 const TOPICS = ["Economics", "Startups", "Stand-up", "Data", "Finance", "Tech", "Science", "Design", "History", "Fitness", "Philosophy", "Music", "Podcast", "Other"];
 
+function formatRelativeTime(createdAt: any) {
+  const ms =
+    typeof createdAt?.toMillis === "function"
+      ? createdAt.toMillis()
+      : typeof createdAt?.seconds === "number"
+        ? createdAt.seconds * 1000
+        : typeof createdAt === "number"
+          ? createdAt
+          : createdAt instanceof Date
+            ? createdAt.getTime()
+            : null;
+
+  if (!ms) return "";
+  const diff = Date.now() - ms;
+  if (diff < 0) return "just now";
+
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  const week = 7 * day;
+  const month = 30 * day;
+  const year = 365 * day;
+
+  if (diff < minute) return "just now";
+  if (diff < hour) return `${Math.floor(diff / minute)}m ago`;
+  if (diff < day) return `${Math.floor(diff / hour)}h ago`;
+  if (diff < week) return `${Math.floor(diff / day)}d ago`;
+  if (diff < month) return `${Math.floor(diff / week)}w ago`;
+  if (diff < year) return `${Math.floor(diff / month)}mo ago`;
+
+  try {
+    return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
 export default function CuratdMVP() {
   const { user, signIn, signOut: handleSignOut } = useAuth();
+  const router = useRouter();
   const username = useUsername();
   const [url, setUrl] = useState('');
   const [startMin, setStartMin] = useState('');
@@ -157,6 +198,8 @@ export default function CuratdMVP() {
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showCuratorRequiredModal, setShowCuratorRequiredModal] = useState(false);
+  const [isCurator, setIsCurator] = useState<boolean | null>(null);
   const pendingAddClipAfterAuth = useRef(false);
   const hadAuthenticatedUser = useRef(false);
   const [playingMoment, setPlayingMoment] = useState<{ clipId: string; momentId: string } | null>(null);
@@ -175,6 +218,7 @@ export default function CuratdMVP() {
   const navPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const [navUploadingPhoto, setNavUploadingPhoto] = useState(false);
   const [navPhotoUrl, setNavPhotoUrl] = useState<string | null>(null);
+  const unreadCount = useUnreadMessageCount(user?.uid);
   const [inlineAddForClipId, setInlineAddForClipId] = useState<string | null>(null);
   const [inlineEdit, setInlineEdit] = useState<{ clipId: string; momentId: string } | null>(null);
   const [inlineStartMin, setInlineStartMin] = useState("");
@@ -185,6 +229,14 @@ export default function CuratdMVP() {
   const [inlineTopic, setInlineTopic] = useState("Other");
   const [inlineCustomTopicDraft, setInlineCustomTopicDraft] = useState("");
   const [inlineSubmitting, setInlineSubmitting] = useState(false);
+  const [likesByClipId, setLikesByClipId] = useState<Record<string, { count: number; liked: boolean }>>({});
+  const [reactionsByClipId, setReactionsByClipId] = useState<
+    Record<string, { counts: Record<string, number>; mine: string | null }>
+  >({});
+  const [commentCountsByClipId, setCommentCountsByClipId] = useState<Record<string, number>>({});
+  const [openCommentsByClipId, setOpenCommentsByClipId] = useState<Record<string, boolean>>({});
+  const [commentsByClipId, setCommentsByClipId] = useState<Record<string, any[]>>({});
+  const [commentDraftByClipId, setCommentDraftByClipId] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const q = query(collection(db, "clips"), orderBy("createdAt", "desc"));
@@ -406,9 +458,105 @@ export default function CuratdMVP() {
     setPlayingMoment(null);
   }, [topicSearch]);
 
+  const toggleLike = async (clipId: string) => {
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+    const refLike = doc(db, "clips", clipId, "likes", user.uid);
+    const current = likesByClipId[clipId]?.liked;
+    try {
+      if (current) {
+        await deleteDoc(refLike);
+      } else {
+        await setDoc(refLike, { likedAt: serverTimestamp() });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const setReaction = async (clipId: string, type: "🔥" | "🧠" | "💎") => {
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+    const refReaction = doc(db, "clips", clipId, "reactions", user.uid);
+    const mine = reactionsByClipId[clipId]?.mine;
+    try {
+      if (mine === type) {
+        await deleteDoc(refReaction);
+      } else {
+        await setDoc(refReaction, { type, reactedAt: serverTimestamp() });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const toggleComments = (clipId: string) => {
+    setOpenCommentsByClipId((prev) => ({ ...prev, [clipId]: !prev[clipId] }));
+  };
+
+  const sendComment = async (clip: any) => {
+    const clipId = String(clip?.id || "");
+    if (!clipId) return;
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+    const text = (commentDraftByClipId[clipId] || "").trim();
+    if (!text) return;
+    try {
+      await addDoc(collection(db, "clips", clipId, "comments"), {
+        userId: user.uid,
+        username: username ?? null,
+        displayName: user.displayName ?? null,
+        photoURL: user.photoURL ?? null,
+        text,
+        createdAt: serverTimestamp(),
+      });
+      setCommentDraftByClipId((prev) => ({ ...prev, [clipId]: "" }));
+      setOpenCommentsByClipId((prev) => ({ ...prev, [clipId]: true }));
+    } catch (e) {
+      console.error(e);
+      alert("Could not post comment.");
+    }
+  };
+
+  const deleteComment = async (clip: any, commentId: string, commentUserId: string | null) => {
+    const clipId = String(clip?.id || "");
+    if (!clipId || !user) return;
+    const isOwner = user.uid === clip.userId;
+    const isSelf = !!commentUserId && user.uid === commentUserId;
+    if (!isOwner && !isSelf) return;
+    try {
+      await deleteDoc(doc(db, "clips", clipId, "comments", commentId));
+    } catch (e) {
+      console.error(e);
+      alert("Could not delete comment.");
+    }
+  };
+
   useEffect(() => {
     setNavPhotoUrl(user?.photoURL ?? null);
   }, [user?.photoURL]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsCurator(null);
+    if (!user) return;
+    getDocs(query(collection(db, "clips"), where("userId", "==", user.uid), limit(1)))
+      .then((snap) => {
+        if (!cancelled) setIsCurator(!snap.empty);
+      })
+      .catch(() => {
+        if (!cancelled) setIsCurator(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!navMenuOpen) return;
@@ -759,6 +907,96 @@ export default function CuratdMVP() {
     });
   }, [clips, followingClips, activeFeedTab, showSaved, savedClips, topicSearch]);
 
+  useEffect(() => {
+    // Keep subscriptions bounded to currently visible clips.
+    const unsubs: Array<() => void> = [];
+    const visible = filtered.slice(0, 30);
+
+    for (const clip of visible) {
+      const clipId = String(clip?.id || "");
+      if (!clipId) continue;
+
+      const likesRef = collection(db, "clips", clipId, "likes");
+      unsubs.push(
+        onSnapshot(
+          likesRef,
+          (snap) => {
+            const liked = !!user?.uid && snap.docs.some((d) => d.id === user.uid);
+            setLikesByClipId((prev) => ({ ...prev, [clipId]: { count: snap.size, liked } }));
+          },
+          () => {
+            setLikesByClipId((prev) => ({ ...prev, [clipId]: { count: 0, liked: false } }));
+          },
+        ),
+      );
+
+      const reactionsRef = collection(db, "clips", clipId, "reactions");
+      unsubs.push(
+        onSnapshot(
+          reactionsRef,
+          (snap) => {
+            const counts: Record<string, number> = { "🔥": 0, "🧠": 0, "💎": 0 };
+            let mine: string | null = null;
+            for (const d of snap.docs) {
+              const data = d.data() as any;
+              const t = typeof data?.type === "string" ? data.type : null;
+              if (t && counts[t] != null) counts[t] += 1;
+              if (user?.uid && d.id === user.uid) mine = t;
+            }
+            setReactionsByClipId((prev) => ({ ...prev, [clipId]: { counts, mine } }));
+          },
+          () => {
+            setReactionsByClipId((prev) => ({
+              ...prev,
+              [clipId]: { counts: { "🔥": 0, "🧠": 0, "💎": 0 }, mine: null },
+            }));
+          },
+        ),
+      );
+
+      const commentsRef = collection(db, "clips", clipId, "comments");
+      unsubs.push(
+        onSnapshot(
+          commentsRef,
+          (snap) => {
+            setCommentCountsByClipId((prev) => ({ ...prev, [clipId]: snap.size }));
+          },
+          () => {
+            setCommentCountsByClipId((prev) => ({ ...prev, [clipId]: 0 }));
+          },
+        ),
+      );
+    }
+
+    return () => {
+      unsubs.forEach((u) => u());
+    };
+  }, [filtered, user?.uid]);
+
+  useEffect(() => {
+    // Subscribe to full comment lists only when expanded.
+    const unsubs: Array<() => void> = [];
+    for (const [clipId, open] of Object.entries(openCommentsByClipId)) {
+      if (!open) continue;
+      const q = query(collection(db, "clips", clipId, "comments"), orderBy("createdAt", "desc"), limit(50));
+      unsubs.push(
+        onSnapshot(
+          q,
+          (snap) => {
+            setCommentsByClipId((prev) => ({
+              ...prev,
+              [clipId]: snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
+            }));
+          },
+          () => {
+            setCommentsByClipId((prev) => ({ ...prev, [clipId]: [] }));
+          },
+        ),
+      );
+    }
+    return () => unsubs.forEach((u) => u());
+  }, [openCommentsByClipId]);
+
   const topTopics = useMemo(() => {
     const feedClips = activeFeedTab === "following" ? followingClips : clips;
     const source = showSaved ? feedClips.filter((c) => savedClips.includes(c.id)) : feedClips;
@@ -847,9 +1085,42 @@ export default function CuratdMVP() {
         <div className="flex min-w-0 justify-center px-2">
           <CuratorSearchBar />
         </div>
-        <div className="flex items-center gap-3 min-w-0 justify-self-end" ref={navMenuRef}>
+        <div className="flex items-center gap-2 min-w-0 justify-self-end" ref={navMenuRef}>
           {user ? (
             <>
+              <button
+                type="button"
+                onClick={() => {
+                  if (isCurator === false) {
+                    setShowCuratorRequiredModal(true);
+                    return;
+                  }
+                  router.push("/messages");
+                }}
+                className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-200 hover:bg-zinc-900/80 transition-colors"
+                title="Messages"
+                aria-label="Messages"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M4.5 6.5h15A2.5 2.5 0 0 1 22 9v9a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 18V9a2.5 2.5 0 0 1 2.5-2.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="m4.8 9 6.2 5.1a2 2 0 0 0 2.6 0L19.8 9"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                {unreadCount > 0 ? (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center border border-black">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                ) : null}
+              </button>
               <input
                 ref={navPhotoInputRef}
                 type="file"
@@ -914,13 +1185,37 @@ export default function CuratdMVP() {
               ) : null}
             </>
           ) : (
-            <button
-              type="button"
-              onClick={() => void signIn()}
-              className="text-sm font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-zinc-200 transition-colors"
-            >
-              Sign In
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setShowAuthModal(true)}
+                className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-200 hover:bg-zinc-900/80 transition-colors"
+                title="Messages"
+                aria-label="Messages"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M4.5 6.5h15A2.5 2.5 0 0 1 22 9v9a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 18V9a2.5 2.5 0 0 1 2.5-2.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="m4.8 9 6.2 5.1a2 2 0 0 0 2.6 0L19.8 9"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => void signIn()}
+                className="text-sm font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-zinc-200 transition-colors"
+              >
+                Sign In
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -1314,10 +1609,174 @@ export default function CuratdMVP() {
                               );
                             })()}
                             </span>
+                            {clip.createdAt ? (
+                              <span className="text-xs text-zinc-500">
+                                {formatRelativeTime(clip.createdAt)}
+                              </span>
+                            ) : null}
                           </div>
                           {primaryMoment?.note ? (
                             <div className="text-base text-zinc-100 font-medium italic border-l-2 border-emerald-500 pl-3 mt-2 line-clamp-3">
                               &ldquo;{primaryMoment.note}&rdquo;
+                            </div>
+                          ) : null}
+
+                          {/* Likes + reactions */}
+                          <div className="mt-4 flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => void toggleLike(String(clip.id))}
+                              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full border transition-colors ${
+                                likesByClipId[String(clip.id)]?.liked
+                                  ? "border-red-500/40 bg-red-500/10 text-red-300"
+                                  : "border-zinc-800 bg-black/20 text-zinc-400 hover:text-white hover:bg-zinc-900/40"
+                              }`}
+                              aria-label="Like"
+                              title="Like"
+                            >
+                              <span aria-hidden>
+                                {likesByClipId[String(clip.id)]?.liked ? "♥" : "♡"}
+                              </span>
+                              <span>{likesByClipId[String(clip.id)]?.count ?? 0}</span>
+                            </button>
+
+                            {(["🔥", "🧠", "💎"] as const).map((r) => {
+                              const data = reactionsByClipId[String(clip.id)];
+                              const mine = data?.mine ?? null;
+                              const count = data?.counts?.[r] ?? 0;
+                              const active = mine === r;
+                              return (
+                                <button
+                                  key={r}
+                                  type="button"
+                                  onClick={() => void setReaction(String(clip.id), r)}
+                                  className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full border transition-colors ${
+                                    active
+                                      ? "border-white/30 bg-white text-black"
+                                      : "border-zinc-800 bg-black/20 text-zinc-400 hover:text-white hover:bg-zinc-900/40"
+                                  }`}
+                                  aria-label={`React ${r}`}
+                                  title="React"
+                                >
+                                  <span aria-hidden>{r}</span>
+                                  <span>{count}</span>
+                                </button>
+                              );
+                            })}
+
+                            <button
+                              type="button"
+                              onClick={() => toggleComments(String(clip.id))}
+                              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full border transition-colors ${
+                                openCommentsByClipId[String(clip.id)]
+                                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                                  : "border-zinc-800 bg-black/20 text-zinc-400 hover:text-white hover:bg-zinc-900/40"
+                              }`}
+                              aria-label="Toggle comments"
+                              title="Comments"
+                            >
+                              <span aria-hidden>💬</span>
+                              <span>{commentCountsByClipId[String(clip.id)] ?? 0}</span>
+                            </button>
+                          </div>
+
+                          {openCommentsByClipId[String(clip.id)] ? (
+                            <div className="mt-3 rounded-xl border border-zinc-800 bg-black/20 p-3">
+                              <div className="space-y-3">
+                                {(commentsByClipId[String(clip.id)] ?? []).length === 0 ? (
+                                  <div className="text-sm text-zinc-500">No comments yet.</div>
+                                ) : (
+                                  <div className="space-y-3">
+                                    {(commentsByClipId[String(clip.id)] ?? []).map((c: any) => {
+                                      const canDelete =
+                                        !!user?.uid && (user.uid === clip.userId || user.uid === c?.userId);
+                                      const handle =
+                                        typeof c?.username === "string" && c.username.trim()
+                                          ? c.username.trim().toLowerCase()
+                                          : null;
+                                      return (
+                                        <div key={String(c?.id || "")} className="flex items-start gap-3">
+                                          {c?.photoURL ? (
+                                            <img
+                                              src={c.photoURL}
+                                              alt=""
+                                              className="h-8 w-8 rounded-full object-cover border border-zinc-800"
+                                            />
+                                          ) : (
+                                            <div className="h-8 w-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[11px] font-bold text-zinc-200">
+                                              {String(c?.displayName || "U").slice(0, 1).toUpperCase()}
+                                            </div>
+                                          )}
+
+                                          <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2">
+                                              {handle ? (
+                                                <Link
+                                                  href={`/${handle}`}
+                                                  className="text-xs font-semibold text-zinc-200 hover:text-emerald-400 hover:underline"
+                                                >
+                                                  @{handle}
+                                                </Link>
+                                              ) : (
+                                                <span className="text-xs font-semibold text-zinc-200">
+                                                  {c?.displayName || "User"}
+                                                </span>
+                                              )}
+                                              <span className="text-[11px] text-zinc-500">
+                                                {c?.createdAt ? formatRelativeTime(c.createdAt) : "just now"}
+                                              </span>
+                                              {canDelete ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() =>
+                                                    void deleteComment(clip, String(c?.id || ""), c?.userId ?? null)
+                                                  }
+                                                  className="ml-auto text-[11px] text-zinc-500 hover:text-red-300 hover:underline"
+                                                >
+                                                  Delete
+                                                </button>
+                                              ) : null}
+                                            </div>
+                                            <div className="mt-1 text-sm text-zinc-100 whitespace-pre-wrap break-words">
+                                              {String(c?.text || "")}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+
+                                <div className="pt-2 border-t border-zinc-800">
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      value={commentDraftByClipId[String(clip.id)] ?? ""}
+                                      onChange={(e) =>
+                                        setCommentDraftByClipId((prev) => ({
+                                          ...prev,
+                                          [String(clip.id)]: e.target.value,
+                                        }))
+                                      }
+                                      onFocus={(e) => {
+                                        if (!user) {
+                                          e.currentTarget.blur();
+                                          setShowAuthModal(true);
+                                        }
+                                      }}
+                                      placeholder="Add a comment..."
+                                      className="flex-1 rounded-lg border border-zinc-800 bg-black/30 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => void sendComment(clip)}
+                                      disabled={!(commentDraftByClipId[String(clip.id)] ?? "").trim()}
+                                      className="shrink-0 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-400 disabled:opacity-50 disabled:hover:bg-emerald-500"
+                                    >
+                                      Send
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           ) : null}
                         </div>
@@ -1642,6 +2101,7 @@ export default function CuratdMVP() {
       </main>
 
       <SignInCuratorModal open={showAuthModal} onClose={closeAuthModal} />
+      <CuratorRequiredModal open={showCuratorRequiredModal} onClose={() => setShowCuratorRequiredModal(false)} />
 
       {toastMessage ? (
         <div className="fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-white shadow-xl">

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { updateProfile } from "firebase/auth";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import {
@@ -18,12 +18,16 @@ import {
   setDoc,
   updateDoc,
   where,
+  limit,
 } from "firebase/firestore";
 import { auth, db, storage } from "../../firebase";
 import { useAuth } from "../auth-context";
 import { UsernameSetup, useUsername } from "../username-setup";
 import { CuratorSearchBar } from "../curator-search-bar";
 import { SignInCuratorModal } from "../sign-in-curator-modal";
+import { CuratorRequiredModal } from "../curator-required-modal";
+import { useUnreadMessageCount } from "../messages/use-unread-count";
+import { getConversationId } from "../messages/messaging";
 
 function extractVideoId(url: string) {
   if (!url) return null;
@@ -48,13 +52,52 @@ function formatDuration(start: number, end: number) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function formatRelativeTime(createdAt: any) {
+  const ms =
+    typeof createdAt?.toMillis === "function"
+      ? createdAt.toMillis()
+      : typeof createdAt?.seconds === "number"
+        ? createdAt.seconds * 1000
+        : typeof createdAt === "number"
+          ? createdAt
+          : createdAt instanceof Date
+            ? createdAt.getTime()
+            : null;
+
+  if (!ms) return "";
+  const diff = Date.now() - ms;
+  if (diff < 0) return "just now";
+
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  const week = 7 * day;
+  const month = 30 * day;
+  const year = 365 * day;
+
+  if (diff < minute) return "just now";
+  if (diff < hour) return `${Math.floor(diff / minute)}m ago`;
+  if (diff < day) return `${Math.floor(diff / hour)}h ago`;
+  if (diff < week) return `${Math.floor(diff / day)}d ago`;
+  if (diff < month) return `${Math.floor(diff / week)}w ago`;
+  if (diff < year) return `${Math.floor(diff / month)}mo ago`;
+
+  try {
+    return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
 export default function PublicProfilePage() {
   const params = useParams<{ username?: string }>();
+  const router = useRouter();
   const usernameParam = (params?.username || "").toString();
   const username = useMemo(() => decodeURIComponent(usernameParam).trim().toLowerCase(), [usernameParam]);
 
   const { user, signIn, signOut: handleSignOut } = useAuth();
   const myUsername = useUsername();
+  const unreadCount = useUnreadMessageCount(user?.uid);
 
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -63,6 +106,12 @@ export default function PublicProfilePage() {
   const [topicSearch, setTopicSearch] = useState("");
   const [playingClip, setPlayingClip] = useState<string | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authModalCopy, setAuthModalCopy] = useState<{ title: string; subtitle: string }>({
+    title: "Sign in to follow curators",
+    subtitle: "Follow curators to keep track of their clips (saves to your account).",
+  });
+  const [showCuratorRequiredModal, setShowCuratorRequiredModal] = useState(false);
+  const [isCurator, setIsCurator] = useState<boolean | null>(null);
   const [following, setFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
@@ -154,6 +203,10 @@ export default function PublicProfilePage() {
   const toggleFollow = useCallback(async () => {
     if (!profile) return;
     if (user == null) {
+      setAuthModalCopy({
+        title: "Sign in to follow curators",
+        subtitle: "Follow curators to keep track of their clips (saves to your account).",
+      });
       setShowAuthModal(true);
       return;
     }
@@ -202,6 +255,22 @@ export default function PublicProfilePage() {
   useEffect(() => {
     setNavPhotoUrl(user?.photoURL ?? null);
   }, [user?.photoURL]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsCurator(null);
+    if (!user) return;
+    getDocs(query(collection(db, "clips"), where("userId", "==", user.uid), limit(1)))
+      .then((snap) => {
+        if (!cancelled) setIsCurator(!snap.empty);
+      })
+      .catch(() => {
+        if (!cancelled) setIsCurator(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!navMenuOpen) return;
@@ -293,9 +362,42 @@ export default function PublicProfilePage() {
         <div className="flex min-w-0 justify-center px-2">
           <CuratorSearchBar />
         </div>
-        <div className="flex items-center gap-3 min-w-0 justify-self-end" ref={navMenuRef}>
+        <div className="flex items-center gap-2 min-w-0 justify-self-end" ref={navMenuRef}>
           {user ? (
             <>
+              <button
+                type="button"
+                onClick={() => {
+                  if (isCurator === false) {
+                    setShowCuratorRequiredModal(true);
+                    return;
+                  }
+                  router.push("/messages");
+                }}
+                className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-200 hover:bg-zinc-900/80 transition-colors"
+                title="Messages"
+                aria-label="Messages"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M4.5 6.5h15A2.5 2.5 0 0 1 22 9v9a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 18V9a2.5 2.5 0 0 1 2.5-2.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="m4.8 9 6.2 5.1a2 2 0 0 0 2.6 0L19.8 9"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                {unreadCount > 0 ? (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] font-bold flex items-center justify-center border border-black">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                ) : null}
+              </button>
               <input
                 ref={navPhotoInputRef}
                 type="file"
@@ -360,13 +462,37 @@ export default function PublicProfilePage() {
               ) : null}
             </>
           ) : (
-            <button
-              type="button"
-              onClick={() => void signIn()}
-              className="text-sm font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-zinc-200 transition-colors"
-            >
-              Sign In
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setShowAuthModal(true)}
+                className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-200 hover:bg-zinc-900/80 transition-colors"
+                title="Messages"
+                aria-label="Messages"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M4.5 6.5h15A2.5 2.5 0 0 1 22 9v9a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 18V9a2.5 2.5 0 0 1 2.5-2.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="m4.8 9 6.2 5.1a2 2 0 0 0 2.6 0L19.8 9"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => void signIn()}
+                className="text-sm font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-zinc-200 transition-colors"
+              >
+                Sign In
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -468,18 +594,57 @@ export default function PublicProfilePage() {
                       </div>
                     </div>
                     {showFollowButton ? (
-                      <button
-                        type="button"
-                        disabled={followBusy}
-                        onClick={() => void toggleFollow()}
-                        className={`shrink-0 text-sm font-semibold px-4 py-2 rounded-full border transition-colors ${
-                          following
-                            ? "border-zinc-600 text-zinc-300 hover:bg-zinc-800/60"
-                            : "border-emerald-500 text-emerald-500 hover:bg-emerald-500/10"
-                        } ${followBusy ? "opacity-50 cursor-not-allowed" : ""}`}
-                      >
-                        {following ? "Following" : "Follow"}
-                      </button>
+                      <div className="shrink-0 flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={followBusy}
+                          onClick={() => void toggleFollow()}
+                          className={`text-sm font-semibold px-4 py-2 rounded-full border transition-colors ${
+                            following
+                              ? "border-zinc-600 text-zinc-300 hover:bg-zinc-800/60"
+                              : "border-emerald-500 text-emerald-500 hover:bg-emerald-500/10"
+                          } ${followBusy ? "opacity-50 cursor-not-allowed" : ""}`}
+                        >
+                          {following ? "Following" : "Follow"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!profile) return;
+                            if (!user) {
+                              setAuthModalCopy({
+                                title: "Sign in to message curators",
+                                subtitle: "Messaging is private between two curators.",
+                              });
+                              setShowAuthModal(true);
+                              return;
+                            }
+                            if (isCurator === false) {
+                              setShowCuratorRequiredModal(true);
+                              return;
+                            }
+                            const convId = getConversationId(user.uid, profile.uid);
+                            void (async () => {
+                              try {
+                                await setDoc(
+                                  doc(db, "conversations", convId),
+                                  {
+                                    participants: [user.uid, profile.uid],
+                                    unreadBy: { [user.uid]: 0, [profile.uid]: 0 },
+                                    lastMessage: "",
+                                    lastMessageAt: serverTimestamp(),
+                                  },
+                                  { merge: true },
+                                );
+                              } catch {}
+                              router.push(`/messages?c=${encodeURIComponent(convId)}`);
+                            })();
+                          }}
+                          className="text-sm font-semibold px-4 py-2 rounded-full border border-zinc-700 text-zinc-200 hover:bg-zinc-800/60 transition-colors"
+                        >
+                          Message
+                        </button>
+                      </div>
                     ) : null}
                   </div>
                 </div>
@@ -639,6 +804,9 @@ export default function PublicProfilePage() {
                             {((primary?.endTime ?? clip.endTime) ?? 0) > 0 ? (
                               <span className="text-xs text-zinc-500">{formatDuration(primary?.startTime ?? clip.startTime, primary?.endTime ?? clip.endTime)}</span>
                             ) : null}
+                            {clip.createdAt ? (
+                              <span className="text-xs text-zinc-500">{formatRelativeTime(clip.createdAt)}</span>
+                            ) : null}
                           </div>
 
                           <button
@@ -668,9 +836,10 @@ export default function PublicProfilePage() {
       <SignInCuratorModal
         open={showAuthModal}
         onClose={() => setShowAuthModal(false)}
-        title="Sign in to follow curators"
-        subtitle="Follow curators to keep track of their clips (saves to your account)."
+        title={authModalCopy.title}
+        subtitle={authModalCopy.subtitle}
       />
+      <CuratorRequiredModal open={showCuratorRequiredModal} onClose={() => setShowCuratorRequiredModal(false)} />
     </div>
   );
 }
