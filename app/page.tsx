@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { db } from '../firebase'; 
-import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc, serverTimestamp, query, orderBy, onSnapshot, setDoc } from "firebase/firestore";
+import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc, serverTimestamp, query, orderBy, onSnapshot, setDoc, where } from "firebase/firestore";
 import { useAuth } from "./auth-context";
 import { UsernameSetup, useUsername } from "./username-setup";
 import { CuratorSearchBar } from "./curator-search-bar";
@@ -160,6 +160,11 @@ export default function CuratdMVP() {
   const [playingClip, setPlayingClip] = useState<string | null>(null);
   const [topicSearch, setTopicSearch] = useState("");
   const [usernamesByUid, setUsernamesByUid] = useState<Record<string, string>>({});
+  const [activeFeedTab, setActiveFeedTab] = useState<"explore" | "following">("explore");
+  const [followingUserIds, setFollowingUserIds] = useState<string[]>([]);
+  const [followingClips, setFollowingClips] = useState<any[]>([]);
+  const [shareClip, setShareClip] = useState<any | null>(null);
+  const [toastMessage, setToastMessage] = useState("");
 
   useEffect(() => {
     const q = query(collection(db, "clips"), orderBy("createdAt", "desc"));
@@ -183,6 +188,74 @@ export default function CuratdMVP() {
       unsubscribeSaved();
     };
   }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user) {
+      setFollowingUserIds([]);
+      setFollowingClips([]);
+      if (activeFeedTab === "following") setActiveFeedTab("explore");
+      return;
+    }
+
+    const followsQ = query(collection(db, "follows"), where("followerUid", "==", user.uid));
+    const unsubscribeFollows = onSnapshot(
+      followsQ,
+      (snapshot) => {
+        const ids = snapshot.docs
+          .map((d) => {
+            const data = d.data() as any;
+            return typeof data?.followingUid === "string" ? data.followingUid : null;
+          })
+          .filter(Boolean) as string[];
+        setFollowingUserIds([...new Set(ids)]);
+      },
+      () => setFollowingUserIds([]),
+    );
+
+    return () => unsubscribeFollows();
+  }, [user?.uid, activeFeedTab]);
+
+  useEffect(() => {
+    if (!user || followingUserIds.length === 0) {
+      setFollowingClips([]);
+      return;
+    }
+
+    const chunks: string[][] = [];
+    for (let i = 0; i < followingUserIds.length; i += 30) {
+      chunks.push(followingUserIds.slice(i, i + 30));
+    }
+
+    const resultsByChunk = new Map<number, any[]>();
+    const publish = () => {
+      const merged = [...resultsByChunk.values()].flat();
+      merged.sort((a, b) => {
+        const bt = b?.createdAt?.toMillis?.() ?? 0;
+        const at = a?.createdAt?.toMillis?.() ?? 0;
+        return bt - at;
+      });
+      setFollowingClips(merged);
+    };
+
+    const unsubs = chunks.map((ids, idx) => {
+      const clipsQ = query(collection(db, "clips"), where("userId", "in", ids));
+      return onSnapshot(
+        clipsQ,
+        (snapshot) => {
+          resultsByChunk.set(idx, snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+          publish();
+        },
+        () => {
+          resultsByChunk.set(idx, []);
+          publish();
+        },
+      );
+    });
+
+    return () => {
+      unsubs.forEach((unsub) => unsub());
+    };
+  }, [user?.uid, followingUserIds]);
 
   useEffect(() => {
     if (user) {
@@ -385,17 +458,19 @@ export default function CuratdMVP() {
   };
 
   const filtered = useMemo(() => {
-    const bySaved = showSaved ? clips.filter((c) => savedClips.includes(c.id)) : clips;
+    const feedClips = activeFeedTab === "following" ? followingClips : clips;
+    const bySaved = showSaved ? feedClips.filter((c) => savedClips.includes(c.id)) : feedClips;
     const q = topicSearch.trim().toLowerCase();
     if (!q) return bySaved;
     return bySaved.filter((c) => {
       const t = c?.topic;
       return typeof t === "string" && t.toLowerCase().includes(q);
     });
-  }, [clips, showSaved, savedClips, topicSearch]);
+  }, [clips, followingClips, activeFeedTab, showSaved, savedClips, topicSearch]);
 
   const topTopics = useMemo(() => {
-    const source = showSaved ? clips.filter((c) => savedClips.includes(c.id)) : clips;
+    const feedClips = activeFeedTab === "following" ? followingClips : clips;
+    const source = showSaved ? feedClips.filter((c) => savedClips.includes(c.id)) : feedClips;
     const counts = new Map<string, { label: string; count: number }>();
     for (const c of source) {
       const raw = c?.topic;
@@ -410,7 +485,59 @@ export default function CuratdMVP() {
     return [...counts.values()]
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
       .slice(0, 5);
-  }, [clips, showSaved, savedClips]);
+  }, [clips, followingClips, activeFeedTab, showSaved, savedClips]);
+
+  const activeFeedClipCount = activeFeedTab === "following" ? followingClips.length : clips.length;
+
+  const getClipHandle = (clip: any) => {
+    const handleFromClip =
+      typeof clip?.username === "string" && clip.username.trim()
+        ? clip.username.trim().toLowerCase()
+        : null;
+    const handleFromLookup =
+      !handleFromClip && typeof clip?.userId === "string"
+        ? usernamesByUid[clip.userId] ?? null
+        : null;
+    return handleFromClip || handleFromLookup;
+  };
+
+  const getShareUrl = (clip: any) => `https://curetd.vercel.app/clip/${clip.id}`;
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    window.setTimeout(() => setToastMessage(""), 1800);
+  };
+
+  const copyShareLink = async (clip: any) => {
+    const url = getShareUrl(clip);
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast("Link copied!");
+    } catch {
+      const input = document.createElement("input");
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+      showToast("Link copied!");
+    }
+  };
+
+  const openXShare = (clip: any) => {
+    const url = getShareUrl(clip);
+    const title = clip?.title || "Untitled clip";
+    const handle = getClipHandle(clip) || "curator";
+    const text = `${title} — curated by @${handle} on Curatd ${url}`;
+    window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, "_blank");
+  };
+
+  const openWhatsAppShare = (clip: any) => {
+    const url = getShareUrl(clip);
+    const title = clip?.title || "Untitled clip";
+    const text = `Check out this clip: ${title} ${url}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+  };
   const previewId = extractVideoId(url);
 
   return (
@@ -614,9 +741,61 @@ export default function CuratdMVP() {
       {/* Main content */}
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-6 py-6">
+          <div className="flex items-center gap-6 border-b border-zinc-800 pb-3 mb-6">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveFeedTab("explore");
+                setShowSaved(false);
+                setPlayingClip(null);
+              }}
+              className={`pb-2 text-sm font-semibold transition-colors border-b-2 ${
+                activeFeedTab === "explore"
+                  ? "border-white text-white"
+                  : "border-transparent text-zinc-500 hover:text-zinc-200"
+              }`}
+            >
+              Explore
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!user) {
+                  setShowAuthModal(true);
+                  return;
+                }
+                setActiveFeedTab("following");
+                setShowSaved(false);
+                setPlayingClip(null);
+              }}
+              className={`pb-2 text-sm font-semibold transition-colors border-b-2 ${
+                activeFeedTab === "following"
+                  ? "border-white text-white"
+                  : "border-transparent text-zinc-500 hover:text-zinc-200"
+              }`}
+            >
+              Following
+            </button>
+          </div>
+
           {/* Feed */}
           <div className="space-y-4 pb-20">
-            {clips.length === 0 ? (
+            {activeFeedTab === "following" && user && followingUserIds.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center border border-zinc-800 rounded-2xl bg-zinc-900/20 px-6">
+                <p className="text-zinc-400 text-sm">Follow curators to see their clips here</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveFeedTab("explore");
+                    setShowSaved(false);
+                    setTopicSearch("");
+                  }}
+                  className="mt-5 rounded-full bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200 transition-colors"
+                >
+                  Discover curators
+                </button>
+              </div>
+            ) : activeFeedClipCount === 0 ? (
               <div className="text-center py-20">
                 <div className="text-5xl mb-4 opacity-20">▶</div>
                 <p className="text-zinc-500 text-lg font-medium">No clips yet</p>
@@ -747,9 +926,30 @@ export default function CuratdMVP() {
                           ) : null}
                         </div>
 
-                        {/* Hover actions */}
-                        {user && clip.userId && user.uid === clip.userId ? (
-                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {/* Clip actions */}
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setShareClip(clip)}
+                            className="text-[11px] text-zinc-400 hover:text-white px-2.5 py-1 rounded-md hover:bg-zinc-800 transition-colors"
+                            aria-label="Share clip"
+                            title="Share"
+                          >
+                            <span className="inline-flex items-center gap-1">
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                                <path
+                                  d="M8.5 12.5 15 9M8.5 11.5 15 15M7 15.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6ZM17 9.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6ZM17 20.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6Z"
+                                  stroke="currentColor"
+                                  strokeWidth="1.7"
+                                  strokeLinecap="round"
+                                />
+                              </svg>
+                              Share
+                            </span>
+                          </button>
+
+                          {user && clip.userId && user.uid === clip.userId ? (
+                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
                               type="button"
                               onClick={() => handleEdit(clip)}
@@ -765,7 +965,8 @@ export default function CuratdMVP() {
                               Delete
                             </button>
                           </div>
-                        ) : null}
+                          ) : null}
+                        </div>
                       </div>
 
                       <div className="flex flex-wrap items-center justify-between gap-3 mt-5 pt-4 border-t border-zinc-800/70">
@@ -821,6 +1022,99 @@ export default function CuratdMVP() {
       </main>
 
       <SignInCuratorModal open={showAuthModal} onClose={closeAuthModal} />
+
+      {toastMessage ? (
+        <div className="fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-white shadow-xl">
+          {toastMessage}
+        </div>
+      ) : null}
+
+      {shareClip ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => setShareClip(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl border border-zinc-700 bg-zinc-900 p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-white">Share clip</h2>
+                <p className="mt-1 line-clamp-1 text-sm text-zinc-500">
+                  {shareClip.title || "Untitled clip"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShareClip(null)}
+                className="shrink-0 text-2xl leading-none text-zinc-500 transition-colors hover:text-white"
+                aria-label="Close share modal"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => void copyShareLink(shareClip)}
+                className="flex w-full items-center gap-3 rounded-lg border border-zinc-800 bg-black/30 px-4 py-3 text-left text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-800/70"
+              >
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-zinc-200">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path
+                      d="M9 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                    />
+                    <path
+                      d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </span>
+                Copy Link
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openXShare(shareClip)}
+                className="flex w-full items-center gap-3 rounded-lg border border-zinc-800 bg-black/30 px-4 py-3 text-left text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-800/70"
+              >
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-zinc-200">
+                  <span className="text-sm font-black">X</span>
+                </span>
+                Share to X/Twitter
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openWhatsAppShare(shareClip)}
+                className="flex w-full items-center gap-3 rounded-lg border border-zinc-800 bg-black/30 px-4 py-3 text-left text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-800/70"
+              >
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-zinc-200">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path
+                      d="M5.5 19.5 6.7 16A7.5 7.5 0 1 1 9 18.2l-3.5 1.3Z"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M9.5 8.8c.2 2.7 2 4.6 4.7 5l1-1.1 1.5.8c.2.1.3.4.2.6-.4 1-1.1 1.6-2.2 1.5-3.6-.2-6.3-2.8-6.7-6.5-.1-1 .5-1.8 1.5-2.1.2-.1.5 0 .6.2l.8 1.5-1.4 1.1Z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </span>
+                Share to WhatsApp
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* ── ADD/EDIT MODAL ── */}
       {showForm && (
