@@ -5,13 +5,14 @@ import {
   serverTimestamp,
   writeBatch,
   type Firestore,
+  type FieldValue,
 } from "firebase/firestore";
 
 export type ConversationDoc = {
   participants: [string, string] | string[];
   lastMessage?: string;
   lastMessageAt?: any;
-  unreadBy?: Record<string, number>;
+  unreadBy?: Record<string, number | FieldValue>;
 };
 
 export type MessageDoc = {
@@ -73,7 +74,7 @@ export async function markConversationRead(args: {
   }
   batch.set(
     doc(args.db, "conversations", args.conversationId),
-    { unreadBy: { [args.viewerId]: 0 } } satisfies ConversationDoc,
+    { unreadBy: { [args.viewerId]: 0 } } satisfies Partial<ConversationDoc>,
     { merge: true },
   );
   await batch.commit();
