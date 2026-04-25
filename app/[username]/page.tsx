@@ -67,6 +67,11 @@ export default function PublicProfilePage() {
   const [followBusy, setFollowBusy] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
+  const [navMenuOpen, setNavMenuOpen] = useState(false);
+  const navMenuRef = useRef<HTMLDivElement | null>(null);
+  const navPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const [navUploadingPhoto, setNavUploadingPhoto] = useState(false);
+  const [navPhotoUrl, setNavPhotoUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -194,6 +199,54 @@ export default function PublicProfilePage() {
     setTopicSearch("");
   }, [username]);
 
+  useEffect(() => {
+    setNavPhotoUrl(user?.photoURL ?? null);
+  }, [user?.photoURL]);
+
+  useEffect(() => {
+    if (!navMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const el = navMenuRef.current;
+      if (el && !el.contains(e.target as Node)) setNavMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [navMenuOpen]);
+
+  const uploadNavPhoto = useCallback(
+    async (file: File) => {
+      const allowed = ["image/jpeg", "image/png", "image/webp"];
+      if (!allowed.includes(file.type)) {
+        alert("Please choose a JPG, PNG, or WebP image.");
+        return;
+      }
+      if (file.size > 2 * 1024 * 1024) {
+        alert("Image must be under 2MB");
+        return;
+      }
+      if (!user) return;
+
+      setNavUploadingPhoto(true);
+      try {
+        const storageRef = ref(storage, `profilePhotos/${user.uid}`);
+        await uploadBytes(storageRef, file, { contentType: file.type });
+        const url = await getDownloadURL(storageRef);
+        await updateDoc(doc(db, "users", user.uid), { photoURL: url });
+        if (auth.currentUser) {
+          await updateProfile(auth.currentUser, { photoURL: url });
+        }
+        setNavPhotoUrl(url);
+        setNavMenuOpen(false);
+      } catch (e) {
+        console.error(e);
+        alert("Could not upload photo. Please try again.");
+      } finally {
+        setNavUploadingPhoto(false);
+      }
+    },
+    [user],
+  );
+
   const handleAvatarFileSelected = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -240,17 +293,29 @@ export default function PublicProfilePage() {
         <div className="flex min-w-0 justify-center px-2">
           <CuratorSearchBar />
         </div>
-        <div className="flex items-center gap-3 min-w-0 justify-self-end">
+        <div className="flex items-center gap-3 min-w-0 justify-self-end" ref={navMenuRef}>
           {user ? (
             <>
-              <Link
-                href={myUsername ? `/${myUsername}` : "/"}
+              <input
+                ref={navPhotoInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (f) void uploadNavPhoto(f);
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setNavMenuOpen((v) => !v)}
                 className="flex items-center gap-2 min-w-0 rounded-xl px-2 py-1.5 hover:bg-zinc-900/80 transition-colors"
-                title={user.displayName || "Your library"}
+                title={user.displayName || "Account"}
               >
-                {user.photoURL ? (
+                {navPhotoUrl ? (
                   <img
-                    src={user.photoURL}
+                    src={navPhotoUrl}
                     alt=""
                     className="w-8 h-8 rounded-full object-cover border border-zinc-700 shrink-0"
                   />
@@ -262,14 +327,37 @@ export default function PublicProfilePage() {
                 <span className="text-sm font-medium text-zinc-100 truncate max-w-[160px] sm:max-w-[220px]">
                   {user.displayName || "Account"}
                 </span>
-              </Link>
-              <button
-                type="button"
-                onClick={() => void handleSignOut()}
-                className="text-xs text-zinc-500 hover:text-red-400 px-2 py-1.5 rounded-lg hover:bg-zinc-900 transition-colors shrink-0"
-              >
-                Sign out
               </button>
+
+              {navMenuOpen ? (
+                <div className="absolute right-4 top-14 z-[80] w-56 rounded-lg border border-zinc-700 bg-zinc-900 shadow-lg p-1">
+                  <Link
+                    href={myUsername ? `/${myUsername}` : "/"}
+                    onClick={() => setNavMenuOpen(false)}
+                    className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70"
+                  >
+                    <span className="text-zinc-400" aria-hidden>👤</span>
+                    My Profile
+                  </Link>
+                  <button
+                    type="button"
+                    disabled={navUploadingPhoto}
+                    onClick={() => navPhotoInputRef.current?.click()}
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <span className="text-zinc-400" aria-hidden>📷</span>
+                    {navUploadingPhoto ? "Uploading..." : "Change Photo"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleSignOut()}
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-red-300 hover:bg-zinc-800/70"
+                  >
+                    <span className="text-red-300/80" aria-hidden>⏻</span>
+                    Sign out
+                  </button>
+                </div>
+              ) : null}
             </>
           ) : (
             <button
@@ -461,10 +549,13 @@ export default function PublicProfilePage() {
                 </div>
               ) : (
                 filteredClips.map((clip, idx) => {
-                  const vid = clip.videoId || extractVideoId(clip.url);
+                  const moments = Array.isArray(clip?.moments) ? clip.moments : null;
+                  const primary = moments && moments.length > 0 ? moments[0] : null;
+                  const clipUrl = clip.videoUrl || clip.url;
+                  const vid = clip.videoId || extractVideoId(clipUrl);
                   const isPlaying = playingClip === clip.id;
                   const embedUrl = vid
-                    ? `https://www.youtube.com/embed/${vid}?start=${clip.startTime || 0}${clip.endTime ? `&end=${clip.endTime}` : ""}&autoplay=1&rel=0&iv_load_policy=3`
+                    ? `https://www.youtube.com/embed/${vid}?start=${primary?.startTime ?? clip.startTime ?? 0}${(primary?.endTime ?? clip.endTime) ? `&end=${primary?.endTime ?? clip.endTime}` : ""}&autoplay=1&rel=0&iv_load_policy=3`
                     : "";
 
                   return (
@@ -530,7 +621,7 @@ export default function PublicProfilePage() {
                           <div className="text-lg font-semibold text-white leading-snug line-clamp-2">
                             {clip.title || "Untitled clip"}
                           </div>
-                          <div className="text-sm text-zinc-500 mt-1 truncate">{clip.channel || "Unknown channel"}</div>
+                          <div className="text-sm text-zinc-500 mt-1 truncate">{clip.channelName || clip.channel || "Unknown channel"}</div>
                           {clip.note ? (
                             <div className="text-base text-zinc-100 font-medium italic border-l-2 border-emerald-500 pl-3 mt-2 line-clamp-3">
                               &ldquo;{clip.note}&rdquo;
@@ -541,10 +632,12 @@ export default function PublicProfilePage() {
                         <div className="flex flex-wrap items-center justify-between gap-3 mt-5 pt-4 border-t border-zinc-800/70">
                           <div className="flex flex-wrap items-center gap-3">
                             <span className="text-[11px] font-mono font-semibold bg-emerald-500 text-white px-2.5 py-1 rounded-md">
-                              {clip.endTime ? `${clip.displayStart} — ${clip.displayEnd}` : "Full video"}
+                              {(primary?.endTime ?? clip.endTime)
+                                ? `${Math.floor(((primary?.startTime ?? clip.startTime) || 0) / 60)}:${String((((primary?.startTime ?? clip.startTime) || 0) % 60)).padStart(2, "0")} — ${Math.floor(((primary?.endTime ?? clip.endTime) || 0) / 60)}:${String((((primary?.endTime ?? clip.endTime) || 0) % 60)).padStart(2, "0")}`
+                                : "Full video"}
                             </span>
-                            {(clip.endTime ?? 0) > 0 ? (
-                              <span className="text-xs text-zinc-500">{formatDuration(clip.startTime, clip.endTime)}</span>
+                            {((primary?.endTime ?? clip.endTime) ?? 0) > 0 ? (
+                              <span className="text-xs text-zinc-500">{formatDuration(primary?.startTime ?? clip.startTime, primary?.endTime ?? clip.endTime)}</span>
                             ) : null}
                           </div>
 

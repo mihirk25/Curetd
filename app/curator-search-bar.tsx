@@ -18,6 +18,7 @@ type ClipSearchHit = {
   channel?: string | null;
   topic?: string | null;
   note?: string | null;
+  moments?: any[] | null;
   url?: string | null;
   videoId?: string | null;
   startTime?: number | null;
@@ -92,15 +93,18 @@ export function CuratorSearchBar() {
       (snap) => {
         const rows: ClipSearchHit[] = snap.docs.map((d) => {
           const data = d.data() as Record<string, unknown>;
+          const moments = Array.isArray((data as any).moments) ? ((data as any).moments as any[]) : null;
+          const primary = moments && moments.length > 0 ? moments[0] : null;
           return {
             id: d.id,
             title: (data.title as string | null | undefined) ?? null,
-            channel: (data.channel as string | null | undefined) ?? null,
-            topic: (data.topic as string | null | undefined) ?? null,
-            note: (data.note as string | null | undefined) ?? null,
-            url: (data.url as string | null | undefined) ?? null,
+            channel: ((data as any).channelName as string | null | undefined) ?? (data.channel as string | null | undefined) ?? null,
+            topic: (primary?.topic as string | null | undefined) ?? ((data as any).topic as string | null | undefined) ?? null,
+            note: (primary?.note as string | null | undefined) ?? (data.note as string | null | undefined) ?? null,
+            moments,
+            url: ((data as any).videoUrl as string | null | undefined) ?? (data.url as string | null | undefined) ?? null,
             videoId: (data.videoId as string | null | undefined) ?? null,
-            startTime: (data.startTime as number | null | undefined) ?? null,
+            startTime: (primary?.startTime as number | null | undefined) ?? (data.startTime as number | null | undefined) ?? null,
           };
         });
         setRecentClips(rows);

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../../firebase";
+import { ClipDetailClient } from "./clip-detail-client";
 
 type ClipPageProps = {
   params: Promise<{ clipId: string }>;
@@ -10,9 +11,11 @@ type ClipPageProps = {
 type ClipDoc = {
   id: string;
   url?: string;
+  videoUrl?: string;
   videoId?: string;
   title?: string;
   channel?: string;
+  channelName?: string;
   note?: string;
   topic?: string;
   username?: string | null;
@@ -22,6 +25,8 @@ type ClipDoc = {
   endTime?: number;
   displayStart?: string;
   displayEnd?: string;
+  displayName?: string;
+  moments?: any[];
 };
 
 function extractVideoId(url?: string) {
@@ -75,9 +80,11 @@ export async function generateMetadata({ params }: ClipPageProps): Promise<Metad
     };
   }
 
-  const videoId = clip.videoId || extractVideoId(clip.url);
+  const videoId = clip.videoId || extractVideoId(clip.videoUrl || clip.url);
   const title = clip.title || "Curatd clip";
-  const description = clip.note || `A YouTube moment curated on Curatd.`;
+  const moments = Array.isArray((clip as any).moments) ? ((clip as any).moments as any[]) : null;
+  const primary = moments && moments.length > 0 ? moments[0] : null;
+  const description = (primary?.note as string | undefined) || clip.note || `A YouTube moment curated on Curatd.`;
   const url = `https://curetd.vercel.app/clip/${clip.id}`;
   const image = thumbnailUrl(videoId);
 
@@ -118,14 +125,6 @@ export default async function ClipPage({ params }: ClipPageProps) {
     );
   }
 
-  const videoId = clip.videoId || extractVideoId(clip.url);
-  const startTime = Math.max(0, Math.floor(clip.startTime || 0));
-  const endTime = clip.endTime && clip.endTime > startTime ? Math.floor(clip.endTime) : undefined;
-  const embedUrl = videoId
-    ? `https://www.youtube.com/embed/${videoId}?start=${startTime}${endTime ? `&end=${endTime}` : ""}&rel=0&iv_load_policy=3`
-    : "";
-  const curator = clip.username ? `@${clip.username}` : clip.userDisplayName || "Unknown curator";
-
   return (
     <main className="min-h-screen bg-black text-white font-sans">
       <div className="max-w-4xl mx-auto px-6 py-8">
@@ -138,64 +137,7 @@ export default async function ClipPage({ params }: ClipPageProps) {
           </Link>
         </div>
 
-        <article className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-900/25">
-          <div className="relative aspect-video bg-zinc-950">
-            {embedUrl ? (
-              <iframe
-                src={embedUrl}
-                title={clip.title || "Curatd clip"}
-                className="absolute inset-0 h-full w-full"
-                allowFullScreen
-              />
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500">
-                Video unavailable
-              </div>
-            )}
-          </div>
-
-          <div className="p-6 sm:p-8">
-            <div className="flex flex-wrap items-center gap-2">
-              {clip.topic ? (
-                <span className="rounded-full border border-zinc-700 bg-zinc-800 px-3 py-1 text-xs font-semibold text-zinc-200">
-                  {clip.topic}
-                </span>
-              ) : null}
-              <span className="rounded-md bg-emerald-500 px-2.5 py-1 text-[11px] font-mono font-semibold text-white">
-                {endTime ? `${clip.displayStart || "0:00"} — ${clip.displayEnd || ""}` : "Full video"}
-              </span>
-            </div>
-
-            <h1 className="mt-5 text-2xl sm:text-3xl font-bold leading-tight">{clip.title || "Untitled clip"}</h1>
-            <p className="mt-2 text-sm text-zinc-500">{clip.channel || "Unknown channel"}</p>
-
-            <div className="mt-4 text-sm text-zinc-500">
-              Curated by{" "}
-              {clip.username ? (
-                <Link href={`/${clip.username}`} className="font-medium text-zinc-200 hover:text-emerald-400 hover:underline">
-                  {curator}
-                </Link>
-              ) : (
-                <span className="font-medium text-zinc-200">{curator}</span>
-              )}
-            </div>
-
-            {clip.note ? (
-              <blockquote className="mt-6 border-l-2 border-emerald-500 pl-4 text-lg font-medium italic text-zinc-100">
-                &ldquo;{clip.note}&rdquo;
-              </blockquote>
-            ) : null}
-
-            {clip.username ? (
-              <Link
-                href={`/${clip.username}`}
-                className="mt-8 inline-flex rounded-full bg-white px-5 py-3 text-sm font-bold text-black transition-colors hover:bg-zinc-200"
-              >
-                View more from @{clip.username}
-              </Link>
-            ) : null}
-          </div>
-        </article>
+        <ClipDetailClient clip={clip as any} videoId={clip.videoId || extractVideoId(clip.videoUrl || clip.url)} />
       </div>
     </main>
   );
