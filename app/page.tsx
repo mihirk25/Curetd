@@ -258,7 +258,7 @@ export default function CuratdMVP() {
       setSavedClips(
         snapshot.docs
           .map((d) => {
-            const data = d.data() as any;
+            const data = d.data() as { clipId?: unknown };
             return typeof data?.clipId === "string" ? data.clipId : null;
           })
           .filter(Boolean) as string[],
