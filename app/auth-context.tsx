@@ -9,6 +9,7 @@ import {
   signOut as firebaseSignOut,
 } from "firebase/auth";
 import { auth } from "../firebase";
+import { ensureGoogleUserHasUsername } from "../src/lib/firestore";
 
 type AuthContextValue = {
   user: User | null;
@@ -38,7 +39,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signIn: async () => {
         try {
           const provider = new GoogleAuthProvider();
-          await signInWithPopup(auth, provider);
+          const cred = await signInWithPopup(auth, provider);
+          const u = cred.user;
+          await ensureGoogleUserHasUsername({
+            uid: u.uid,
+            email: u.email,
+            googleDisplayName: u.displayName,
+            photoURL: u.photoURL,
+          });
         } catch (e: any) {
           const code = e?.code as string | undefined;
           if (

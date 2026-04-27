@@ -325,13 +325,13 @@ export function MessagesClient() {
                           <img src={other.photoURL} alt="" className="w-10 h-10 rounded-full object-cover border border-zinc-800" />
                         ) : (
                           <div className="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-black text-xs font-bold border border-zinc-800">
-                            {String(other?.displayName || other?.username || "U").slice(0, 1).toUpperCase()}
+                            {String(other?.username || "U").slice(0, 1).toUpperCase()}
                           </div>
                         )}
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center justify-between gap-2">
                             <div className="text-sm font-semibold truncate">
-                              {other?.displayName || (other?.username ? `@${other.username}` : "Unknown")}
+                              {other?.username ? `@${other.username}` : "Unknown"}
                             </div>
                             <div className="text-[11px] text-zinc-500 shrink-0">{formatRelativeTime((c.data as any)?.lastMessageAt)}</div>
                           </div>
@@ -386,11 +386,13 @@ export function MessagesClient() {
                     />
                   ) : (
                     <div className="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-black text-xs font-bold border border-zinc-800">
-                      {String(otherParticipant?.displayName || otherParticipant?.username || "U").slice(0, 1).toUpperCase()}
+                      {String(otherParticipant?.username || "U").slice(0, 1).toUpperCase()}
                     </div>
                   )}
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold truncate">{otherParticipant?.displayName || "Conversation"}</div>
+                    <div className="text-sm font-semibold truncate">
+                      {otherParticipant?.username ? `@${otherParticipant.username}` : "Conversation"}
+                    </div>
                     <div className="text-xs text-zinc-500 truncate">
                       {otherParticipant?.username ? (
                         <Link href={`/${otherParticipant.username}`} className="hover:text-zinc-300 transition-colors">

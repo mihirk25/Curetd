@@ -1,20 +1,25 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import {
-  doc,
-  getDoc,
-  serverTimestamp,
-  updateDoc,
-  writeBatch,
-} from "firebase/firestore";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "./auth-context";
+import {
+  ensureGoogleUserHasUsername,
+  registerInitialUsername,
+} from "../src/lib/firestore";
 
-const UsernameContext = createContext<string | null>(null);
+const UsernameStateContext = createContext<{
+  username: string | null;
+  refreshUsername: () => Promise<void>;
+}>({ username: null, refreshUsername: async () => {} });
 
 export function useUsername() {
-  return useContext(UsernameContext);
+  return useContext(UsernameStateContext).username;
+}
+
+export function useRefreshUsername() {
+  return useContext(UsernameStateContext).refreshUsername;
 }
 
 function validateUsername(raw: string) {
@@ -33,6 +38,22 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const refreshUsername = useCallback(async () => {
+    if (!user) {
+      setUsername(null);
+      return;
+    }
+    try {
+      const userRef = doc(db, "users", user.uid);
+      const snap = await getDoc(userRef);
+      const u = snap.exists() ? (snap.data() as { username?: string }) : null;
+      const existing = u?.username ? String(u.username).toLowerCase() : null;
+      setUsername(existing);
+    } catch {
+      setUsername(null);
+    }
+  }, [user?.uid]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -49,20 +70,22 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
 
       setChecking(true);
       try {
+        await ensureGoogleUserHasUsername({
+          uid: user.uid,
+          email: user.email,
+          googleDisplayName: user.displayName,
+          photoURL: user.photoURL,
+        });
+        if (cancelled) return;
+
         const userRef = doc(db, "users", user.uid);
         const snap = await getDoc(userRef);
-        const u = snap.exists() ? (snap.data() as any) : null;
-        const existing = u?.username ? String(u.username) : null;
+        const u = snap.exists() ? (snap.data() as { username?: string }) : null;
+        const existing = u?.username ? String(u.username).toLowerCase() : null;
         if (cancelled) return;
         if (existing) {
           setUsername(existing);
           setOpen(false);
-          const dn = u?.displayName ?? user.displayName ?? null;
-          if (dn != null && u?.displayNameLower == null) {
-            updateDoc(userRef, {
-              displayNameLower: String(dn).toLowerCase(),
-            }).catch(() => {});
-          }
         } else {
           setUsername(null);
           setOpen(true);
@@ -77,13 +100,16 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
       }
     }
 
-    run();
+    void run();
     return () => {
       cancelled = true;
     };
   }, [user?.uid]);
 
-  const contextValue = useMemo(() => username, [username]);
+  const contextValue = useMemo(
+    () => ({ username, refreshUsername }),
+    [username, refreshUsername],
+  );
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -98,37 +124,29 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
 
     setSaving(true);
     try {
-      const handleRef = doc(db, "usernames", normalized);
-      const handleSnap = await getDoc(handleRef);
-      if (handleSnap.exists()) {
-        setError("That username is taken.");
-        setSaving(false);
-        return;
-      }
-
-      const batch = writeBatch(db);
-      const displayName = user.displayName ?? null;
-      batch.set(doc(db, "users", user.uid), {
-        username: normalized,
-        displayName,
-        displayNameLower: (displayName ?? "").toLowerCase(),
+      await registerInitialUsername(user.uid, normalized, {
+        googleDisplayName: user.displayName,
         photoURL: user.photoURL,
-        createdAt: serverTimestamp(),
       });
-      batch.set(handleRef, { uid: user.uid });
-      await batch.commit();
 
       setUsername(normalized);
       setOpen(false);
-    } catch {
-      setError("Could not save username. Please try again.");
+    } catch (err: unknown) {
+      const code = err && typeof err === "object" && "message" in err ? String((err as { message: string }).message) : "";
+      if (code === "USERNAME_TAKEN") {
+        setError("That username is taken.");
+      } else if (code === "ALREADY_HAS_USERNAME") {
+        setError("You already have a username on this account.");
+      } else {
+        setError("Could not save username. Please try again.");
+      }
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <UsernameContext.Provider value={contextValue}>
+    <UsernameStateContext.Provider value={contextValue}>
       {children}
 
       {open && user && !checking && (
@@ -183,7 +201,6 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
           </div>
         </div>
       )}
-    </UsernameContext.Provider>
+    </UsernameStateContext.Provider>
   );
 }
-

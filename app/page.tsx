@@ -6,6 +6,7 @@ import { auth, db, storage } from "../firebase";
 import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, serverTimestamp, query, orderBy, onSnapshot, setDoc, where, limit, arrayUnion, Timestamp } from "firebase/firestore";
 import { useAuth } from "./auth-context";
 import { UsernameSetup, useUsername } from "./username-setup";
+import { EditUsernameModal } from "./edit-username-control";
 import { CuratorSearchBar } from "./curator-search-bar";
 import { SignInCuratorModal } from "./sign-in-curator-modal";
 import { CuratorRequiredModal } from "./curator-required-modal";
@@ -54,6 +55,17 @@ function ClipYouTubePlayer({
 
   useEffect(() => {
     let cancelled = false;
+    let timeGuardInterval: ReturnType<typeof setInterval> | null = null;
+    const clearTimeGuard = () => {
+      if (timeGuardInterval != null) {
+        clearInterval(timeGuardInterval);
+        timeGuardInterval = null;
+      }
+    };
+
+    const startSeconds = Math.max(0, startTime || 0);
+    const hasEnd = endTime != null && endTime > startSeconds;
+    const endClipSeconds = hasEnd && endTime != null ? endTime : null;
 
     (async () => {
       const YT = await loadYouTubeIframeAPI();
@@ -71,32 +83,48 @@ function ClipYouTubePlayer({
       playerRef.current = new YT.Player(mount, {
         videoId,
         playerVars: {
-          autoplay: 1,
-          start: startTime || 0,
-          ...(endTime ? { end: endTime } : {}),
+          autoplay: 0,
           rel: 0,
           iv_load_policy: 3,
         },
         events: {
           onReady: (e: any) => {
             try {
-              e?.target?.seekTo(startTime || 0, true);
-              e?.target?.playVideo?.();
+              const p = e?.target;
+              if (!p) return;
+              if (hasEnd && endClipSeconds != null) {
+                p.cueVideoById({
+                  videoId,
+                  startSeconds,
+                  endSeconds: endClipSeconds,
+                });
+              } else {
+                p.cueVideoById({ videoId, startSeconds });
+              }
+              p.playVideo?.();
             } catch {}
           },
           onStateChange: (event: any) => {
             try {
-              // 0 = ENDED
-              if (event?.data === 0) {
-                event?.target?.seekTo(startTime || 0, true);
-                event?.target?.pauseVideo?.();
-              }
-              // Also guard against replay-from-0 behavior
-              if (event?.data === 1) {
-                const t = event?.target?.getCurrentTime?.() ?? 0;
-                if ((startTime || 0) > 0 && t < (startTime || 0) - 0.25) {
-                  event?.target?.seekTo(startTime || 0, true);
-                }
+              if (event?.data === YT.PlayerState.PLAYING) {
+                clearTimeGuard();
+                const p = event?.target;
+                if (!p) return;
+                timeGuardInterval = setInterval(() => {
+                  try {
+                    const t = p.getCurrentTime?.() ?? 0;
+                    if (t < startSeconds) {
+                      p.seekTo?.(startSeconds, true);
+                      return;
+                    }
+                    if (hasEnd && endClipSeconds != null && t >= endClipSeconds) {
+                      p.pauseVideo?.();
+                      p.seekTo?.(startSeconds, true);
+                    }
+                  } catch {}
+                }, 250);
+              } else {
+                clearTimeGuard();
               }
             } catch {}
           },
@@ -106,6 +134,7 @@ function ClipYouTubePlayer({
 
     return () => {
       cancelled = true;
+      clearTimeGuard();
       try {
         playerRef.current?.destroy?.();
       } catch {}
@@ -209,11 +238,12 @@ export default function CuratdMVP() {
   const [followingUserIds, setFollowingUserIds] = useState<string[]>([]);
   const [followingClips, setFollowingClips] = useState<any[]>([]);
   const [followingProfiles, setFollowingProfiles] = useState<
-    { uid: string; username: string | null; displayName: string | null; photoURL: string | null }[]
+    { uid: string; username: string; photoURL: string | null }[]
   >([]);
   const [shareClip, setShareClip] = useState<any | null>(null);
   const [toastMessage, setToastMessage] = useState("");
   const [navMenuOpen, setNavMenuOpen] = useState(false);
+  const [editUsernameOpen, setEditUsernameOpen] = useState(false);
   const navMenuRef = useRef<HTMLDivElement | null>(null);
   const navPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const [navUploadingPhoto, setNavUploadingPhoto] = useState(false);
@@ -344,12 +374,10 @@ export default function CuratdMVP() {
             const snap = await getDoc(doc(db, "users", uid));
             const data = snap.exists() ? (snap.data() as any) : null;
             const usernameVal = typeof data?.username === "string" ? data.username.trim().toLowerCase() : null;
-            const displayNameVal = typeof data?.displayName === "string" ? data.displayName : null;
             const photoURLVal = typeof data?.photoURL === "string" ? data.photoURL : null;
             return {
               uid,
               username: usernameVal,
-              displayName: displayNameVal,
               photoURL: photoURLVal,
             };
           } catch {
@@ -363,16 +391,11 @@ export default function CuratdMVP() {
         .filter(Boolean)
         .filter((p) => (p as any).username) as {
         uid: string;
-        username: string | null;
-        displayName: string | null;
+        username: string;
         photoURL: string | null;
       }[];
 
-      cleaned.sort((a, b) => {
-        const an = (a.displayName || a.username || "").toLowerCase();
-        const bn = (b.displayName || b.username || "").toLowerCase();
-        return an.localeCompare(bn);
-      });
+      cleaned.sort((a, b) => a.username.localeCompare(b.username));
 
       setFollowingProfiles(cleaned);
     }
@@ -511,7 +534,7 @@ export default function CuratdMVP() {
       await addDoc(collection(db, "clips", clipId, "comments"), {
         userId: user.uid,
         username: username ?? null,
-        displayName: user.displayName ?? null,
+        displayName: username ?? null,
         photoURL: user.photoURL ?? null,
         text,
         createdAt: serverTimestamp(),
@@ -710,7 +733,7 @@ export default function CuratdMVP() {
           channelName: channel,
           userId: user.uid,
           username: username ?? null,
-          displayName: user.displayName || "Anonymous",
+          displayName: username || "Anonymous",
           createdAt: data?.createdAt ?? serverTimestamp(),
           moments,
         });
@@ -730,7 +753,7 @@ export default function CuratdMVP() {
             channelName: channel,
             videoId,
             username: username ?? null,
-            displayName: user.displayName || "Anonymous",
+            displayName: username || "Anonymous",
             moments: arrayUnion(moment),
           });
         } else {
@@ -741,7 +764,7 @@ export default function CuratdMVP() {
             channelName: channel,
             userId: user.uid,
             username: username ?? null,
-            displayName: user.displayName || "Anonymous",
+            displayName: username || "Anonymous",
             createdAt: serverTimestamp(),
             moments: [moment],
           });
@@ -1036,7 +1059,7 @@ export default function CuratdMVP() {
     return handleFromClip || handleFromLookup;
   };
 
-  const getShareUrl = (clip: any) => `https://curetd.vercel.app/clip/${clip.id}`;
+  const getShareUrl = (clip: any) => `https://curatd.vercel.app/clip/${clip.id}`;
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -1078,6 +1101,13 @@ export default function CuratdMVP() {
   return (
     <div className="h-screen bg-black text-white font-sans flex flex-col">
       <UsernameSetup />
+      {username ? (
+        <EditUsernameModal
+          open={editUsernameOpen}
+          onOpenChange={setEditUsernameOpen}
+          currentUsername={username}
+        />
+      ) : null}
       <header className="shrink-0 h-14 border-b border-zinc-800 grid grid-cols-[minmax(0,auto)_1fr_minmax(0,auto)] items-center gap-4 px-4 bg-black">
         <Link href="/" className="text-sm font-bold tracking-tight text-white hover:text-zinc-200 transition-colors shrink-0">
           CURATD
@@ -1136,7 +1166,7 @@ export default function CuratdMVP() {
                 type="button"
                 onClick={() => setNavMenuOpen((v) => !v)}
                 className="flex items-center gap-2 min-w-0 rounded-xl px-2 py-1.5 hover:bg-zinc-900/80 transition-colors"
-                title={user.displayName || "Account"}
+                title={username ? `@${username}` : "Account"}
               >
                 {navPhotoUrl ? (
                   <img
@@ -1146,11 +1176,11 @@ export default function CuratdMVP() {
                   />
                 ) : (
                   <div className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center text-black text-xs font-bold shrink-0">
-                    {(user.displayName || "U").slice(0, 1).toUpperCase()}
+                    {(username || "U").slice(0, 1).toUpperCase()}
                   </div>
                 )}
                 <span className="text-sm font-medium text-zinc-100 truncate max-w-[160px] sm:max-w-[220px]">
-                  {user.displayName || "Account"}
+                  {username ? `@${username}` : "Account"}
                 </span>
               </button>
 
@@ -1173,6 +1203,19 @@ export default function CuratdMVP() {
                     <span className="text-zinc-400" aria-hidden>📷</span>
                     {navUploadingPhoto ? "Uploading..." : "Change Photo"}
                   </button>
+                  {username ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditUsernameOpen(true);
+                        setNavMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70"
+                    >
+                      <span className="text-zinc-400" aria-hidden>@</span>
+                      Edit username
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => void handleSignOut()}
@@ -1295,15 +1338,12 @@ export default function CuratdMVP() {
                         />
                       ) : (
                         <div className="h-9 w-9 rounded-full bg-emerald-500 flex items-center justify-center text-black text-xs font-bold shrink-0">
-                          {(p.displayName || p.username || "U").slice(0, 1).toUpperCase()}
+                          {(p.username || "U").slice(0, 1).toUpperCase()}
                         </div>
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="text-xs font-semibold text-white truncate">
-                          {p.displayName || "Anonymous"}
-                        </div>
-                        <div className="text-[11px] text-zinc-500 truncate">
-                          {p.username ? `@${p.username}` : ""}
+                          {p.username ? `@${p.username}` : "Anonymous"}
                         </div>
                       </div>
                     </Link>
@@ -1603,9 +1643,7 @@ export default function CuratdMVP() {
                                 );
                               }
                               return (
-                                <span className="text-zinc-300 font-medium">
-                                  {clip.userDisplayName || "Unknown curator"}
-                                </span>
+                                <span className="text-zinc-300 font-medium">Unknown curator</span>
                               );
                             })()}
                             </span>
@@ -1704,7 +1742,7 @@ export default function CuratdMVP() {
                                             />
                                           ) : (
                                             <div className="h-8 w-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[11px] font-bold text-zinc-200">
-                                              {String(c?.displayName || "U").slice(0, 1).toUpperCase()}
+                                              {String(c?.username || "U").slice(0, 1).toUpperCase()}
                                             </div>
                                           )}
 
@@ -1718,9 +1756,7 @@ export default function CuratdMVP() {
                                                   @{handle}
                                                 </Link>
                                               ) : (
-                                                <span className="text-xs font-semibold text-zinc-200">
-                                                  {c?.displayName || "User"}
-                                                </span>
+                                                <span className="text-xs font-semibold text-zinc-200">User</span>
                                               )}
                                               <span className="text-[11px] text-zinc-500">
                                                 {c?.createdAt ? formatRelativeTime(c.createdAt) : "just now"}

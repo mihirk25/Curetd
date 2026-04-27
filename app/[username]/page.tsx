@@ -23,6 +23,7 @@ import {
 import { auth, db, storage } from "../../firebase";
 import { useAuth } from "../auth-context";
 import { UsernameSetup, useUsername } from "../username-setup";
+import { EditUsernameModal } from "../edit-username-control";
 import { CuratorSearchBar } from "../curator-search-bar";
 import { SignInCuratorModal } from "../sign-in-curator-modal";
 import { CuratorRequiredModal } from "../curator-required-modal";
@@ -101,7 +102,7 @@ export default function PublicProfilePage() {
 
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [profile, setProfile] = useState<{ uid: string; username: string; displayName: string; photoURL: string | null } | null>(null);
+  const [profile, setProfile] = useState<{ uid: string; username: string; photoURL: string | null } | null>(null);
   const [clips, setClips] = useState<any[]>([]);
   const [topicSearch, setTopicSearch] = useState("");
   const [playingClip, setPlayingClip] = useState<string | null>(null);
@@ -117,6 +118,7 @@ export default function PublicProfilePage() {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
   const [navMenuOpen, setNavMenuOpen] = useState(false);
+  const [editUsernameOpen, setEditUsernameOpen] = useState(false);
   const navMenuRef = useRef<HTMLDivElement | null>(null);
   const navPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const [navUploadingPhoto, setNavUploadingPhoto] = useState(false);
@@ -167,7 +169,6 @@ export default function PublicProfilePage() {
         setProfile({
           uid,
           username,
-          displayName: (userData as any)?.displayName || "Anonymous",
           photoURL: (userData as any)?.photoURL || null,
         });
         setClips(clipsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -355,6 +356,13 @@ export default function PublicProfilePage() {
   return (
     <div className="min-h-screen bg-black text-white font-sans flex flex-col">
       <UsernameSetup />
+      {myUsername ? (
+        <EditUsernameModal
+          open={editUsernameOpen}
+          onOpenChange={setEditUsernameOpen}
+          currentUsername={myUsername}
+        />
+      ) : null}
       <header className="shrink-0 h-14 border-b border-zinc-800 grid grid-cols-[minmax(0,auto)_1fr_minmax(0,auto)] items-center gap-4 px-4 bg-black">
         <Link href="/" className="text-sm font-bold tracking-tight text-white hover:text-zinc-200 transition-colors shrink-0">
           CURATD
@@ -413,7 +421,7 @@ export default function PublicProfilePage() {
                 type="button"
                 onClick={() => setNavMenuOpen((v) => !v)}
                 className="flex items-center gap-2 min-w-0 rounded-xl px-2 py-1.5 hover:bg-zinc-900/80 transition-colors"
-                title={user.displayName || "Account"}
+                title={myUsername ? `@${myUsername}` : "Account"}
               >
                 {navPhotoUrl ? (
                   <img
@@ -423,11 +431,11 @@ export default function PublicProfilePage() {
                   />
                 ) : (
                   <div className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center text-black text-xs font-bold shrink-0">
-                    {(user.displayName || "U").slice(0, 1).toUpperCase()}
+                    {(myUsername || "U").slice(0, 1).toUpperCase()}
                   </div>
                 )}
                 <span className="text-sm font-medium text-zinc-100 truncate max-w-[160px] sm:max-w-[220px]">
-                  {user.displayName || "Account"}
+                  {myUsername ? `@${myUsername}` : "Account"}
                 </span>
               </button>
 
@@ -450,6 +458,19 @@ export default function PublicProfilePage() {
                     <span className="text-zinc-400" aria-hidden>📷</span>
                     {navUploadingPhoto ? "Uploading..." : "Change Photo"}
                   </button>
+                  {myUsername ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditUsernameOpen(true);
+                        setNavMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70"
+                    >
+                      <span className="text-zinc-400" aria-hidden>@</span>
+                      Edit username
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => void handleSignOut()}
@@ -534,7 +555,7 @@ export default function PublicProfilePage() {
                       />
                     ) : (
                       <div className="pointer-events-none flex h-14 w-14 items-center justify-center rounded-full border border-zinc-800 bg-emerald-500 text-xl font-bold text-black">
-                        {(profile.displayName || "A").slice(0, 1).toUpperCase()}
+                        {(profile.username || "A").slice(0, 1).toUpperCase()}
                       </div>
                     )}
                     <button
@@ -572,21 +593,19 @@ export default function PublicProfilePage() {
                 ) : profile.photoURL ? (
                   <img
                     src={profile.photoURL}
-                    alt={profile.displayName}
+                    alt=""
                     className="h-14 w-14 shrink-0 rounded-full border border-zinc-800 object-cover"
                   />
                 ) : (
                   <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-xl font-bold text-black">
-                    {(profile.displayName || "A").slice(0, 1).toUpperCase()}
+                    {(profile.username || "A").slice(0, 1).toUpperCase()}
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-2xl font-bold leading-tight truncate">{profile.displayName}</div>
+                      <div className="text-2xl font-bold leading-tight truncate">@{profile.username}</div>
                       <div className="text-sm text-zinc-500 mt-1">
-                        <span className="text-emerald-500 font-semibold">@{profile.username}</span>
-                        <span className="mx-2 text-zinc-700">·</span>
                         <span>
                           <span className="text-white font-semibold">{clips.length}</span>{" "}
                           <span className="text-zinc-500">clips</span>

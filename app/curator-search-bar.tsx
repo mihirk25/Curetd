@@ -8,7 +8,6 @@ import { db } from "../firebase";
 export type CuratorSearchHit = {
   id: string;
   username?: string;
-  displayName?: string | null;
   photoURL?: string | null;
 };
 
@@ -62,9 +61,9 @@ export function CuratorSearchBar() {
     }
     const q = query(
       collection(db, "users"),
-      where("displayNameLower", ">=", debouncedPrefix),
-      where("displayNameLower", "<=", `${debouncedPrefix}\uf8ff`),
-      orderBy("displayNameLower"),
+      where("username", ">=", debouncedPrefix),
+      where("username", "<=", `${debouncedPrefix}\uf8ff`),
+      orderBy("username"),
       limit(20),
     );
     const unsub = onSnapshot(
@@ -76,7 +75,6 @@ export function CuratorSearchBar() {
             return {
               id: d.id,
               username: typeof data.username === "string" ? data.username : undefined,
-              displayName: (data.displayName as string | null | undefined) ?? null,
               photoURL: (data.photoURL as string | null | undefined) ?? null,
             };
           })
@@ -208,12 +206,11 @@ export function CuratorSearchBar() {
                         />
                       ) : (
                         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-xs font-semibold text-zinc-300">
-                          {(h.displayName || "?").slice(0, 1).toUpperCase()}
+                          {(h.username || "?").slice(0, 1).toUpperCase()}
                         </div>
                       )}
                       <div className="min-w-0 flex-1 text-left">
-                        <div className="truncate text-sm font-medium text-zinc-100">{h.displayName || "Anonymous"}</div>
-                        <div className="truncate text-xs text-zinc-500">@{h.username}</div>
+                        <div className="truncate text-sm font-medium text-zinc-100">@{h.username}</div>
                       </div>
                     </Link>
                   ))}
