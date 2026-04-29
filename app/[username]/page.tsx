@@ -22,13 +22,20 @@ import {
 } from "firebase/firestore";
 import { auth, db, storage } from "../../firebase";
 import { useAuth } from "../auth-context";
-import { UsernameSetup, useUsername } from "../username-setup";
+import { UsernameSetup } from "../username-setup";
 import { EditUsernameModal } from "../edit-username-control";
 import { CuratorSearchBar } from "../curator-search-bar";
 import { SignInCuratorModal } from "../sign-in-curator-modal";
 import { CuratorRequiredModal } from "../curator-required-modal";
 import { useUnreadMessageCount } from "../messages/use-unread-count";
 import { getConversationId } from "../messages/messaging";
+import {
+  followUser,
+  getFollowerCount,
+  getFollowingCount,
+  isFollowing,
+  unfollowUser,
+} from "../lib/firestore";
 
 function extractVideoId(url: string) {
   if (!url) return null;
@@ -97,12 +104,17 @@ export default function PublicProfilePage() {
   const username = useMemo(() => decodeURIComponent(usernameParam).trim().toLowerCase(), [usernameParam]);
 
   const { user, signIn, signOut: handleSignOut } = useAuth();
-  const myUsername = useUsername();
+  const myUsername = user?.username ?? null;
   const unreadCount = useUnreadMessageCount(user?.uid);
 
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [profile, setProfile] = useState<{ uid: string; username: string; photoURL: string | null } | null>(null);
+  const [profile, setProfile] = useState<{
+    uid: string;
+    username: string;
+    photoURL: string | null;
+    profileTopics: string[];
+  } | null>(null);
   const [clips, setClips] = useState<any[]>([]);
   const [topicSearch, setTopicSearch] = useState("");
   const [playingClip, setPlayingClip] = useState<string | null>(null);
@@ -115,6 +127,8 @@ export default function PublicProfilePage() {
   const [isCurator, setIsCurator] = useState<boolean | null>(null);
   const [following, setFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
+  const [followerCount, setFollowerCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
   const [navMenuOpen, setNavMenuOpen] = useState(false);
@@ -170,6 +184,9 @@ export default function PublicProfilePage() {
           uid,
           username,
           photoURL: (userData as any)?.photoURL || null,
+          profileTopics: Array.isArray((userData as any)?.profileTopics)
+            ? ((userData as any).profileTopics as unknown[]).filter((t) => typeof t === "string").slice(0, 4) as string[]
+            : [],
         });
         setClips(clipsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
         setLoading(false);
@@ -193,13 +210,33 @@ export default function PublicProfilePage() {
       setFollowing(false);
       return;
     }
-    const followId = `${user.uid}_${profile.uid}`;
-    const followRef = doc(db, "follows", followId);
-    const unsub = onSnapshot(followRef, (snap) => {
-      setFollowing(snap.exists());
-    });
-    return () => unsub();
+    isFollowing(user.uid, profile.uid)
+      .then((v) => setFollowing(v))
+      .catch(() => setFollowing(false));
   }, [user?.uid, profile?.uid]);
+
+  useEffect(() => {
+    if (!profile) {
+      setFollowerCount(0);
+      setFollowingCount(0);
+      return;
+    }
+    let cancelled = false;
+    Promise.all([getFollowerCount(profile.uid), getFollowingCount(profile.uid)])
+      .then(([followers, followingN]) => {
+        if (cancelled) return;
+        setFollowerCount(followers);
+        setFollowingCount(followingN);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFollowerCount(0);
+        setFollowingCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.uid, following]);
 
   const toggleFollow = useCallback(async () => {
     if (!profile) return;
@@ -212,21 +249,17 @@ export default function PublicProfilePage() {
       return;
     }
     if (user.uid === profile.uid) return;
-    const followId = `${user.uid}_${profile.uid}`;
-    const followRef = doc(db, "follows", followId);
     setFollowBusy(true);
+    const next = !following;
+    setFollowing(next);
+    setFollowerCount((v) => Math.max(0, v + (next ? 1 : -1)));
     try {
-      if (following) {
-        await deleteDoc(followRef);
-      } else {
-        await setDoc(followRef, {
-          followerUid: user.uid,
-          followingUid: profile.uid,
-          createdAt: serverTimestamp(),
-        });
-      }
+      if (following) await unfollowUser(user.uid, profile.uid);
+      else await followUser(user.uid, profile.uid);
     } catch (e) {
       console.error(e);
+      setFollowing(!next);
+      setFollowerCount((v) => Math.max(0, v + (next ? -1 : 1)));
     } finally {
       setFollowBusy(false);
     }
@@ -603,11 +636,20 @@ export default function PublicProfilePage() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-2xl font-bold leading-tight truncate">@{profile.username}</div>
-                      <div className="text-sm text-zinc-500 mt-1">
-                        <span>
-                          <span className="text-white font-semibold">{clips.length}</span>{" "}
-                          <span className="text-zinc-500">clips</span>
-                        </span>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {profile.profileTopics.slice(0, 4).map((topic) => (
+                          <Link
+                            href={`/?topic=${encodeURIComponent(topic)}`}
+                            key={topic}
+                            className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25"
+                          >
+                            {topic}
+                          </Link>
+                        ))}
+                      </div>
+                      <div className="text-sm text-zinc-500 mt-2">
+                        <span className="text-white font-semibold">{followerCount}</span> followers ·{" "}
+                        <span className="text-white font-semibold">{followingCount}</span> following
                       </div>
                     </div>
                     {showFollowButton ? (
@@ -616,13 +658,20 @@ export default function PublicProfilePage() {
                           type="button"
                           disabled={followBusy}
                           onClick={() => void toggleFollow()}
-                          className={`text-sm font-semibold px-4 py-2 rounded-full border transition-colors ${
+                          className={`group text-sm font-semibold px-4 py-2 rounded-full border transition-colors ${
                             following
-                              ? "border-zinc-600 text-zinc-300 hover:bg-zinc-800/60"
-                              : "border-emerald-500 text-emerald-500 hover:bg-emerald-500/10"
+                              ? "border-emerald-500 bg-emerald-500 text-black hover:bg-red-500 hover:border-red-500"
+                              : "border-zinc-300 text-zinc-200 hover:border-white"
                           } ${followBusy ? "opacity-50 cursor-not-allowed" : ""}`}
                         >
-                          {following ? "Following" : "Follow"}
+                          {following ? (
+                            <>
+                              <span className="group-hover:hidden">Following</span>
+                              <span className="hidden group-hover:inline">Unfollow</span>
+                            </>
+                          ) : (
+                            "Follow"
+                          )}
                         </button>
                         <button
                           type="button"

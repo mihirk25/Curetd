@@ -167,45 +167,48 @@ export async function registerInitialUsername(
  * Change handle for an existing user (move usernames/ doc atomically).
  */
 export async function changeUsername(uid: string, raw: string) {
-  let normalized: string;
-  try {
-    ({ username: normalized } = validateUsernameFormat(raw));
-  } catch (e) {
-    throw e;
-  }
+  const { username: normalized } = validateUsernameFormat(raw);
 
   const userRef = doc(db, "users", uid);
   const newRef = doc(db, "usernames", normalized);
 
-  await runTransaction(db, async (tx) => {
-    const userSnap = await tx.get(userRef);
-    if (!userSnap.exists()) {
-      throw new Error("user not found");
-    }
-    const old = (userSnap.data() as { username?: string }).username;
-    const oldNorm = typeof old === "string" && old.trim() ? old.trim().toLowerCase() : null;
-    if (oldNorm === normalized) {
-      return;
-    }
-
-    const newSnap = await tx.get(newRef);
-    if (newSnap.exists()) {
-      const owner = (newSnap.data() as { uid?: string })?.uid;
-      if (owner && owner !== uid) {
-        throw new Error(USERNAME_TAKEN);
+  try {
+    await runTransaction(db, async (tx) => {
+      const userSnap = await tx.get(userRef);
+      if (!userSnap.exists()) {
+        throw new Error("user not found");
       }
-    } else {
-      tx.set(newRef, { uid });
-    }
-
-    if (oldNorm && oldNorm !== normalized) {
-      const oldRef = doc(db, "usernames", oldNorm);
-      const oldH = await tx.get(oldRef);
-      if (oldH.exists() && (oldH.data() as { uid?: string })?.uid === uid) {
-        tx.delete(oldRef);
+      const old = (userSnap.data() as { username?: string }).username;
+      const oldNorm = typeof old === "string" && old.trim() ? old.trim().toLowerCase() : null;
+      if (oldNorm === normalized) {
+        return;
       }
-    }
 
-    tx.update(userRef, { username: normalized });
-  });
+      const newSnap = await tx.get(newRef);
+      const oldRef =
+        oldNorm && oldNorm !== normalized ? doc(db, "usernames", oldNorm) : null;
+      const oldHandleSnap = oldRef ? await tx.get(oldRef) : null;
+
+      if (newSnap.exists()) {
+        const owner = (newSnap.data() as { uid?: string })?.uid;
+        if (owner && owner !== uid) {
+          throw new Error(USERNAME_TAKEN);
+        }
+      } else {
+        tx.set(newRef, { uid });
+      }
+
+      if (oldRef && oldHandleSnap?.exists()) {
+        const oldOwner = (oldHandleSnap.data() as { uid?: string })?.uid;
+        if (oldOwner === uid) {
+          tx.delete(oldRef);
+        }
+      }
+
+      tx.update(userRef, { username: normalized });
+    });
+  } catch (error) {
+    console.error("changeUsername transaction failed:", error);
+    throw error;
+  }
 }

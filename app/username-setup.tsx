@@ -210,6 +210,7 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
           </div>
         </div>
       )}
+
     </UsernameStateContext.Provider>
   );
 }

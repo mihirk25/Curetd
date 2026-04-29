@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "./auth-context";
-import { useRefreshUsername } from "./username-setup";
 import { changeUsername, USERNAME_TAKEN, validateUsernameFormat } from "../src/lib/firestore";
 
 type EditUsernameControlProps = {
@@ -15,7 +14,6 @@ type EditUsernameControlProps = {
 
 export function EditUsernameModal({ open, onOpenChange, currentUsername }: EditUsernameControlProps) {
   const { user } = useAuth();
-  const refreshUsername = useRefreshUsername();
   const router = useRouter();
   const [input, setInput] = useState("");
   const [saving, setSaving] = useState(false);
@@ -52,7 +50,6 @@ export function EditUsernameModal({ open, onOpenChange, currentUsername }: EditU
     setSaving(true);
     try {
       await changeUsername(user.uid, normalized);
-      await refreshUsername();
       if (
         currentUsername &&
         typeof window !== "undefined" &&
@@ -62,9 +59,22 @@ export function EditUsernameModal({ open, onOpenChange, currentUsername }: EditU
       }
       handleClose();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "";
+      console.error("Username update failed:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      const code =
+        err !== null &&
+        typeof err === "object" &&
+        "code" in err &&
+        typeof (err as { code?: unknown }).code === "string"
+          ? (err as { code: string }).code
+          : "";
+      const msgLower = msg.toLowerCase();
       if (msg === USERNAME_TAKEN) {
         setError("That username is taken.");
+      } else if (code === "permission-denied") {
+        setError("Permission denied — check Firestore rules");
+      } else if (code === "already-exists" || msgLower.includes("already exists")) {
+        setError("That username is taken, try another");
       } else {
         setError("Could not update username. Please try again.");
       }
