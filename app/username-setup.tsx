@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "./auth-context";
 import {
@@ -55,20 +55,33 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
   }, [user?.uid]);
 
   useEffect(() => {
-    let cancelled = false;
+    setError(null);
+    setSaving(false);
+    setInput("");
 
-    async function run() {
-      setError(null);
-      setSaving(false);
-      setInput("");
+    if (!user) {
+      setUsername(null);
+      setOpen(false);
+      setChecking(false);
+      return;
+    }
 
-      if (!user) {
+    const userRef = doc(db, "users", user.uid);
+    const unsub = onSnapshot(
+      userRef,
+      (snap) => {
+        const data = snap.exists() ? (snap.data() as { username?: string }) : null;
+        const v = data?.username && String(data.username).trim() ? String(data.username).toLowerCase() : null;
+        setUsername(v);
+      },
+      () => {
         setUsername(null);
-        setOpen(false);
-        return;
-      }
+      },
+    );
 
-      setChecking(true);
+    let cancelled = false;
+    setChecking(true);
+    void (async () => {
       try {
         await ensureGoogleUserHasUsername({
           uid: user.uid,
@@ -76,35 +89,31 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
           googleDisplayName: user.displayName,
           photoURL: user.photoURL,
         });
-        if (cancelled) return;
-
-        const userRef = doc(db, "users", user.uid);
-        const snap = await getDoc(userRef);
-        const u = snap.exists() ? (snap.data() as { username?: string }) : null;
-        const existing = u?.username ? String(u.username).toLowerCase() : null;
-        if (cancelled) return;
-        if (existing) {
-          setUsername(existing);
-          setOpen(false);
-        } else {
-          setUsername(null);
-          setOpen(true);
-        }
       } catch {
-        if (!cancelled) {
-          setUsername(null);
-          setOpen(true);
-        }
+        // Firestore rules or offline; snapshot + choose-username flow still apply
       } finally {
         if (!cancelled) setChecking(false);
       }
-    }
+    })();
 
-    void run();
     return () => {
       cancelled = true;
+      unsub();
     };
   }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user) {
+      setOpen(false);
+      return;
+    }
+    if (checking) return;
+    if (username) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+  }, [user, username, checking]);
 
   const contextValue = useMemo(
     () => ({ username, refreshUsername }),

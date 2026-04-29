@@ -9,6 +9,7 @@ import { changeUsername, USERNAME_TAKEN, validateUsernameFormat } from "../src/l
 type EditUsernameControlProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Empty when the user has not claimed a handle yet; first save uses the same flow as change. */
   currentUsername: string;
 };
 
@@ -44,7 +45,7 @@ export function EditUsernameModal({ open, onOpenChange, currentUsername }: EditU
       setError(err instanceof Error ? err.message : "Invalid username.");
       return;
     }
-    if (normalized === currentUsername) {
+    if (currentUsername && normalized === currentUsername) {
       handleClose();
       return;
     }
@@ -52,7 +53,11 @@ export function EditUsernameModal({ open, onOpenChange, currentUsername }: EditU
     try {
       await changeUsername(user.uid, normalized);
       await refreshUsername();
-      if (typeof window !== "undefined" && window.location.pathname === `/${currentUsername}`) {
+      if (
+        currentUsername &&
+        typeof window !== "undefined" &&
+        window.location.pathname === `/${currentUsername}`
+      ) {
         router.replace(`/${normalized}`);
       }
       handleClose();
@@ -77,7 +82,7 @@ export function EditUsernameModal({ open, onOpenChange, currentUsername }: EditU
         className="w-full max-w-md rounded-3xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl"
         onClick={(ev) => ev.stopPropagation()}
       >
-        <h2 className="text-lg font-bold">Edit username</h2>
+        <h2 className="text-lg font-bold">{currentUsername ? "Edit username" : "Choose username"}</h2>
         <p className="mt-1 text-sm text-zinc-500">3–20 characters, lowercase, only a–z, 0–9, and _.</p>
         <form onSubmit={onSubmit} className="mt-4 space-y-3">
           <input

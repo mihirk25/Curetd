@@ -28,6 +28,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
+      if (u) {
+        void ensureGoogleUserHasUsername({
+          uid: u.uid,
+          email: u.email,
+          googleDisplayName: u.displayName,
+          photoURL: u.photoURL,
+        }).catch(() => {
+          // Rules/network failures are surfaced in UsernameSetup / choose-username flow
+        });
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -39,14 +49,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signIn: async () => {
         try {
           const provider = new GoogleAuthProvider();
-          const cred = await signInWithPopup(auth, provider);
-          const u = cred.user;
-          await ensureGoogleUserHasUsername({
-            uid: u.uid,
-            email: u.email,
-            googleDisplayName: u.displayName,
-            photoURL: u.photoURL,
-          });
+          await signInWithPopup(auth, provider);
+          // ensureGoogleUserHasUsername runs from onAuthStateChanged for the signed-in user
         } catch (e: any) {
           const code = e?.code as string | undefined;
           if (

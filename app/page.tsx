@@ -240,7 +240,8 @@ export default function CuratdMVP() {
   const [followingProfiles, setFollowingProfiles] = useState<
     { uid: string; username: string; photoURL: string | null }[]
   >([]);
-  const [shareClip, setShareClip] = useState<any | null>(null);
+  const [openShareMenuClipId, setOpenShareMenuClipId] = useState<string | null>(null);
+  const shareMenuRef = useRef<HTMLDivElement | null>(null);
   const [toastMessage, setToastMessage] = useState("");
   const [navMenuOpen, setNavMenuOpen] = useState(false);
   const [editUsernameOpen, setEditUsernameOpen] = useState(false);
@@ -590,6 +591,16 @@ export default function CuratdMVP() {
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [navMenuOpen]);
+
+  useEffect(() => {
+    if (!openShareMenuClipId) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const el = shareMenuRef.current;
+      if (el && !el.contains(e.target as Node)) setOpenShareMenuClipId(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [openShareMenuClipId]);
 
   const uploadNavPhoto = async (file: File) => {
     const allowed = ["image/jpeg", "image/png", "image/webp"];
@@ -1047,30 +1058,15 @@ export default function CuratdMVP() {
 
   const activeFeedClipCount = activeFeedTab === "following" ? followingClips.length : clips.length;
 
-  const getClipHandle = (clip: any) => {
-    const handleFromClip =
-      typeof clip?.username === "string" && clip.username.trim()
-        ? clip.username.trim().toLowerCase()
-        : null;
-    const handleFromLookup =
-      !handleFromClip && typeof clip?.userId === "string"
-        ? usernamesByUid[clip.userId] ?? null
-        : null;
-    return handleFromClip || handleFromLookup;
-  };
-
-  const getShareUrl = (clip: any) => `https://curatd.vercel.app/clip/${clip.id}`;
-
   const showToast = (message: string) => {
     setToastMessage(message);
-    window.setTimeout(() => setToastMessage(""), 1800);
+    window.setTimeout(() => setToastMessage(""), 2000);
   };
 
-  const copyShareLink = async (clip: any) => {
-    const url = getShareUrl(clip);
+  const copyTextToClipboard = async (url: string) => {
     try {
       await navigator.clipboard.writeText(url);
-      showToast("Link copied!");
+      showToast("Link copied");
     } catch {
       const input = document.createElement("input");
       input.value = url;
@@ -1078,34 +1074,19 @@ export default function CuratdMVP() {
       input.select();
       document.execCommand("copy");
       document.body.removeChild(input);
-      showToast("Link copied!");
+      showToast("Link copied");
     }
-  };
-
-  const openXShare = (clip: any) => {
-    const url = getShareUrl(clip);
-    const title = clip?.title || "Untitled clip";
-    const handle = getClipHandle(clip) || "curator";
-    const text = `${title} — curated by @${handle} on Curatd ${url}`;
-    window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, "_blank");
-  };
-
-  const openWhatsAppShare = (clip: any) => {
-    const url = getShareUrl(clip);
-    const title = clip?.title || "Untitled clip";
-    const text = `Check out this clip: ${title} ${url}`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
   };
   const previewId = extractVideoId(url);
 
   return (
     <div className="h-screen bg-black text-white font-sans flex flex-col">
       <UsernameSetup />
-      {username ? (
+      {user ? (
         <EditUsernameModal
           open={editUsernameOpen}
           onOpenChange={setEditUsernameOpen}
-          currentUsername={username}
+          currentUsername={username ?? ""}
         />
       ) : null}
       <header className="shrink-0 h-14 border-b border-zinc-800 grid grid-cols-[minmax(0,auto)_1fr_minmax(0,auto)] items-center gap-4 px-4 bg-black">
@@ -1166,7 +1147,7 @@ export default function CuratdMVP() {
                 type="button"
                 onClick={() => setNavMenuOpen((v) => !v)}
                 className="flex items-center gap-2 min-w-0 rounded-xl px-2 py-1.5 hover:bg-zinc-900/80 transition-colors"
-                title={username ? `@${username}` : "Account"}
+                title={username ? `@${username}` : "Setting up..."}
               >
                 {navPhotoUrl ? (
                   <img
@@ -1180,7 +1161,7 @@ export default function CuratdMVP() {
                   </div>
                 )}
                 <span className="text-sm font-medium text-zinc-100 truncate max-w-[160px] sm:max-w-[220px]">
-                  {username ? `@${username}` : "Account"}
+                  {username ? `@${username}` : "Setting up..."}
                 </span>
               </button>
 
@@ -1203,19 +1184,17 @@ export default function CuratdMVP() {
                     <span className="text-zinc-400" aria-hidden>📷</span>
                     {navUploadingPhoto ? "Uploading..." : "Change Photo"}
                   </button>
-                  {username ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditUsernameOpen(true);
-                        setNavMenuOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70"
-                    >
-                      <span className="text-zinc-400" aria-hidden>@</span>
-                      Edit username
-                    </button>
-                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditUsernameOpen(true);
+                      setNavMenuOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70"
+                  >
+                    <span className="text-zinc-400" aria-hidden>@</span>
+                    Edit username
+                  </button>
                   <button
                     type="button"
                     onClick={() => void handleSignOut()}
@@ -1819,25 +1798,79 @@ export default function CuratdMVP() {
 
                       {/* Clip actions */}
                       <div className="flex gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setShareClip(clip)}
-                            className="text-[11px] text-zinc-400 hover:text-white px-2.5 py-1 rounded-md hover:bg-zinc-800 transition-colors"
-                            aria-label="Share clip"
-                            title="Share"
+                          <div
+                            className="relative"
+                            ref={openShareMenuClipId === String(clip.id) ? shareMenuRef : undefined}
                           >
-                            <span className="inline-flex items-center gap-1">
-                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                                <path
-                                  d="M8.5 12.5 15 9M8.5 11.5 15 15M7 15.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6ZM17 9.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6ZM17 20.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6Z"
-                                  stroke="currentColor"
-                                  strokeWidth="1.7"
-                                  strokeLinecap="round"
-                                />
-                              </svg>
-                              Share
-                            </span>
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setOpenShareMenuClipId((id) => (id === String(clip.id) ? null : String(clip.id)))
+                              }
+                              className="text-[11px] text-zinc-400 hover:text-white px-2.5 py-1 rounded-md hover:bg-zinc-800 transition-colors"
+                              aria-label="Share options"
+                              aria-expanded={openShareMenuClipId === String(clip.id)}
+                              title="Share"
+                            >
+                              <span className="inline-flex items-center gap-1">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                                  <path
+                                    d="M8.5 12.5 15 9M8.5 11.5 15 15M7 15.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6ZM17 9.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6ZM17 20.5a3 3 0 1 1 0-6 3 3 0 0 1 0 6Z"
+                                    stroke="currentColor"
+                                    strokeWidth="1.7"
+                                    strokeLinecap="round"
+                                  />
+                                </svg>
+                                Share
+                              </span>
+                            </button>
+                            {openShareMenuClipId === String(clip.id) ? (
+                              <div
+                                className="absolute right-0 top-full z-[90] mt-1 min-w-[200px] rounded-lg border border-zinc-700 bg-zinc-900 py-1 shadow-xl"
+                                role="menu"
+                              >
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="block w-full px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+                                  onClick={() => {
+                                    void copyTextToClipboard(
+                                      `https://curatd.vercel.app/clip/${clip.id}`,
+                                    );
+                                    setOpenShareMenuClipId(null);
+                                  }}
+                                >
+                                  Share clip
+                                </button>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="block w-full px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+                                  disabled={!vid}
+                                  onClick={() => {
+                                    if (!vid) return;
+                                    void copyTextToClipboard(`https://youtube.com/watch?v=${vid}`);
+                                    setOpenShareMenuClipId(null);
+                                  }}
+                                >
+                                  Share full video
+                                </button>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="block w-full px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+                                  onClick={() => {
+                                    void copyTextToClipboard(
+                                      `https://curatd.vercel.app/clip/${clip.id}?audio=1`,
+                                    );
+                                    setOpenShareMenuClipId(null);
+                                  }}
+                                >
+                                  Share audio only
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
 
                           {user && clip.userId && user.uid === clip.userId ? (
                             <button
@@ -2142,93 +2175,6 @@ export default function CuratdMVP() {
       {toastMessage ? (
         <div className="fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-white shadow-xl">
           {toastMessage}
-        </div>
-      ) : null}
-
-      {shareClip ? (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-          onClick={() => setShareClip(null)}
-        >
-          <div
-            className="w-full max-w-sm rounded-xl border border-zinc-700 bg-zinc-900 p-5 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-bold text-white">Share clip</h2>
-                <p className="mt-1 line-clamp-1 text-sm text-zinc-500">
-                  {shareClip.title || "Untitled clip"}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShareClip(null)}
-                className="shrink-0 text-2xl leading-none text-zinc-500 transition-colors hover:text-white"
-                aria-label="Close share modal"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => void copyShareLink(shareClip)}
-                className="flex w-full items-center gap-3 rounded-lg border border-zinc-800 bg-black/30 px-4 py-3 text-left text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-800/70"
-              >
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-zinc-200">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path
-                      d="M9 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                    />
-                    <path
-                      d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </span>
-                Copy Link
-              </button>
-
-              <button
-                type="button"
-                onClick={() => openXShare(shareClip)}
-                className="flex w-full items-center gap-3 rounded-lg border border-zinc-800 bg-black/30 px-4 py-3 text-left text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-800/70"
-              >
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-zinc-200">
-                  <span className="text-sm font-black">X</span>
-                </span>
-                Share to X/Twitter
-              </button>
-
-              <button
-                type="button"
-                onClick={() => openWhatsAppShare(shareClip)}
-                className="flex w-full items-center gap-3 rounded-lg border border-zinc-800 bg-black/30 px-4 py-3 text-left text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-800/70"
-              >
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-zinc-200">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path
-                      d="M5.5 19.5 6.7 16A7.5 7.5 0 1 1 9 18.2l-3.5 1.3Z"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M9.5 8.8c.2 2.7 2 4.6 4.7 5l1-1.1 1.5.8c.2.1.3.4.2.6-.4 1-1.1 1.6-2.2 1.5-3.6-.2-6.3-2.8-6.7-6.5-.1-1 .5-1.8 1.5-2.1.2-.1.5 0 .6.2l.8 1.5-1.4 1.1Z"
-                      fill="currentColor"
-                    />
-                  </svg>
-                </span>
-                Share to WhatsApp
-              </button>
-            </div>
-          </div>
         </div>
       ) : null}
 

@@ -356,11 +356,11 @@ export default function PublicProfilePage() {
   return (
     <div className="min-h-screen bg-black text-white font-sans flex flex-col">
       <UsernameSetup />
-      {myUsername ? (
+      {user ? (
         <EditUsernameModal
           open={editUsernameOpen}
           onOpenChange={setEditUsernameOpen}
-          currentUsername={myUsername}
+          currentUsername={myUsername ?? ""}
         />
       ) : null}
       <header className="shrink-0 h-14 border-b border-zinc-800 grid grid-cols-[minmax(0,auto)_1fr_minmax(0,auto)] items-center gap-4 px-4 bg-black">
@@ -421,7 +421,7 @@ export default function PublicProfilePage() {
                 type="button"
                 onClick={() => setNavMenuOpen((v) => !v)}
                 className="flex items-center gap-2 min-w-0 rounded-xl px-2 py-1.5 hover:bg-zinc-900/80 transition-colors"
-                title={myUsername ? `@${myUsername}` : "Account"}
+                title={myUsername ? `@${myUsername}` : "Setting up..."}
               >
                 {navPhotoUrl ? (
                   <img
@@ -435,7 +435,7 @@ export default function PublicProfilePage() {
                   </div>
                 )}
                 <span className="text-sm font-medium text-zinc-100 truncate max-w-[160px] sm:max-w-[220px]">
-                  {myUsername ? `@${myUsername}` : "Account"}
+                  {myUsername ? `@${myUsername}` : "Setting up..."}
                 </span>
               </button>
 
@@ -458,19 +458,17 @@ export default function PublicProfilePage() {
                     <span className="text-zinc-400" aria-hidden>📷</span>
                     {navUploadingPhoto ? "Uploading..." : "Change Photo"}
                   </button>
-                  {myUsername ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditUsernameOpen(true);
-                        setNavMenuOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70"
-                    >
-                      <span className="text-zinc-400" aria-hidden>@</span>
-                      Edit username
-                    </button>
-                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditUsernameOpen(true);
+                      setNavMenuOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70"
+                  >
+                    <span className="text-zinc-400" aria-hidden>@</span>
+                    Edit username
+                  </button>
                   <button
                     type="button"
                     onClick={() => void handleSignOut()}

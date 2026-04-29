@@ -6,6 +6,7 @@ import { SharedClipPlayer } from "./shared-clip-player";
 
 type Props = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ audio?: string | string[] }>;
 };
 
 type ClipDoc = {
@@ -119,8 +120,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-export default async function SharedClipPage({ params }: Props) {
+export default async function SharedClipPage({ params, searchParams }: Props) {
   const { id } = await params;
+  const sp = await searchParams;
+  const audioParam = sp?.audio;
+  const audioOnly =
+    audioParam === "1" ||
+    audioParam === "true" ||
+    (Array.isArray(audioParam) && audioParam.some((v) => v === "1" || v === "true"));
   const clip = await getClip(id);
 
   if (!clip) {
@@ -171,7 +178,14 @@ export default async function SharedClipPage({ params }: Props) {
         </div>
 
         {videoId ? (
-          <SharedClipPlayer videoId={videoId} startTime={startSeconds} endTime={endSeconds} />
+          <SharedClipPlayer
+            videoId={videoId}
+            startTime={startSeconds}
+            endTime={endSeconds}
+            audioOnly={audioOnly}
+            videoTitle={clip.title || "Untitled clip"}
+            curatorUsername={clip.username}
+          />
         ) : (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-16 text-center text-sm text-zinc-500">
             Video unavailable (missing YouTube ID).
