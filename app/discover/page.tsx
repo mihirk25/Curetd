@@ -107,7 +107,7 @@ export default function DiscoverPage() {
               .map(([t]) => t);
             const topics =
               profileTopics.length > 0
-                ? profileTopics.filter((t) => clipTopicCounts.has(String(t)))
+                ? profileTopics.filter((t: string) => clipTopicCounts.has(String(t)))
                 : clipTopics;
             rows.push({
               uid,
