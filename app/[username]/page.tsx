@@ -179,6 +179,14 @@ export default function PublicProfilePage() {
         const clipsQ = query(collection(db, "clips"), where("userId", "==", uid), orderBy("createdAt", "desc"));
         const clipsSnap = await getDocs(clipsQ);
 
+        const repostsQ = query(
+          collection(db, "reposts"),
+          where("repostedByUid", "==", uid),
+          orderBy("repostedAt", "desc"),
+          limit(200),
+        );
+        const repostsSnap = await getDocs(repostsQ);
+
         if (cancelled) return;
         setProfile({
           uid,
@@ -188,7 +196,40 @@ export default function PublicProfilePage() {
             ? ((userData as any).profileTopics as unknown[]).filter((t) => typeof t === "string").slice(0, 4) as string[]
             : [],
         });
-        setClips(clipsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        const authored = clipsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const reposted: any[] = [];
+        for (const d of repostsSnap.docs) {
+          const data = d.data() as any;
+          const originalClipId = String(data?.originalClipId || "");
+          if (!originalClipId) continue;
+          try {
+            const clipSnap = await getDoc(doc(db, "clips", originalClipId));
+            if (!clipSnap.exists()) continue;
+            reposted.push({
+              id: clipSnap.id,
+              ...clipSnap.data(),
+              __repost: true,
+              __repostedAt: data?.repostedAt ?? null,
+              __repostedByUsername: username,
+              __originalCuratorId: String(data?.originalCuratorId || ""),
+            });
+          } catch {}
+        }
+        const sortMs = (v: any) => {
+          try {
+            if (typeof v?.toMillis === "function") return v.toMillis();
+            if (typeof v?.seconds === "number") return v.seconds * 1000;
+            if (typeof v === "number") return v;
+            if (v instanceof Date) return v.getTime();
+          } catch {}
+          return 0;
+        };
+        const merged = [...authored, ...reposted].sort((a: any, b: any) => {
+          const aMs = a.__repost ? sortMs(a.__repostedAt) : sortMs(a.createdAt);
+          const bMs = b.__repost ? sortMs(b.__repostedAt) : sortMs(b.createdAt);
+          return bMs - aMs;
+        });
+        setClips(merged);
         setLoading(false);
       } catch (err) {
         console.error("Profile load error:", err);
@@ -798,6 +839,12 @@ export default function PublicProfilePage() {
                           : "border-zinc-800/70 hover:border-zinc-700"
                       }`}
                     >
+                      {clip.__repost ? (
+                        <div className="px-5 pt-4 text-xs font-semibold text-zinc-300">
+                          🔁 Reposted by{" "}
+                          <span className="text-zinc-200">@{String(clip.__repostedByUsername || "").trim() || "unknown"}</span>
+                        </div>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => {
@@ -852,6 +899,18 @@ export default function PublicProfilePage() {
                           <div className="text-lg font-semibold text-white leading-snug line-clamp-2">
                             {clip.title || "Untitled clip"}
                           </div>
+                          {clip.__repost ? (
+                            <div className="text-xs text-zinc-500 mt-1">
+                              Originally curated by{" "}
+                              {clip.username ? (
+                                <Link href={`/${String(clip.username).trim().toLowerCase()}`} className="font-medium text-zinc-300 hover:underline">
+                                  @{String(clip.username).trim().toLowerCase()}
+                                </Link>
+                              ) : (
+                                <span className="font-medium text-zinc-300">unknown curator</span>
+                              )}
+                            </div>
+                          ) : null}
                           <div className="text-sm text-zinc-500 mt-1 truncate">{clip.channelName || clip.channel || "Unknown channel"}</div>
                           {clip.note ? (
                             <div className="text-base text-zinc-100 font-medium italic border-l-2 border-emerald-500 pl-3 mt-2 line-clamp-3">

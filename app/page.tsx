@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { auth, db, storage } from "../firebase";
-import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, serverTimestamp, query, orderBy, onSnapshot, setDoc, where, limit, arrayUnion, Timestamp } from "firebase/firestore";
+import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, serverTimestamp, query, orderBy, onSnapshot, setDoc, where, limit, arrayUnion, Timestamp, increment } from "firebase/firestore";
 import { useAuth } from "./auth-context";
 import { UsernameSetup } from "./username-setup";
 import { EditUsernameModal } from "./edit-username-control";
@@ -37,6 +37,8 @@ declare global {
   }
 }
 
+const feedPlayerByClipId = new Map<string, any>();
+
 function loadYouTubeIframeAPI(): Promise<any> {
   if (typeof window === 'undefined') return Promise.resolve(null);
   if (window.YT?.Player) return Promise.resolve(window.YT);
@@ -60,10 +62,14 @@ function ClipYouTubePlayer({
   videoId,
   startTime,
   endTime,
+  onPlayerReady,
+  onClipEnded,
 }: {
   videoId: string;
   startTime: number;
   endTime?: number;
+  onPlayerReady?: (player: any) => void;
+  onClipEnded?: () => void;
 }) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -108,6 +114,9 @@ function ClipYouTubePlayer({
             try {
               const p = e?.target;
               if (!p) return;
+              try {
+                onPlayerReady?.(p);
+              } catch {}
               if (hasEnd && endClipSeconds != null) {
                 p.cueVideoById({
                   videoId,
@@ -134,6 +143,9 @@ function ClipYouTubePlayer({
                       return;
                     }
                     if (hasEnd && endClipSeconds != null && t >= endClipSeconds) {
+                      try {
+                        onClipEnded?.();
+                      } catch {}
                       p.pauseVideo?.();
                       p.seekTo?.(startSeconds, true);
                     }
@@ -167,16 +179,170 @@ function ClipYouTubePlayer({
   return <div ref={wrapperRef} className="absolute inset-0 w-full h-full" />;
 }
 
+function VideoClipControls({
+  player,
+  startSeconds,
+  endSeconds,
+  onEnded,
+}: {
+  player: any;
+  startSeconds: number;
+  endSeconds?: number;
+  onEnded?: () => void;
+}) {
+  const [elapsed, setElapsed] = useState(0);
+  const endedOnceRef = useRef(false);
+
+  const duration = useMemo(() => {
+    if (endSeconds == null || endSeconds <= startSeconds) return 0;
+    return Math.max(0, Number(endSeconds) - Number(startSeconds));
+  }, [endSeconds, startSeconds]);
+
+  useEffect(() => {
+    if (!player || duration <= 0 || endSeconds == null) return;
+    endedOnceRef.current = false;
+    const id = setInterval(() => {
+      try {
+        const t = Number(player.getCurrentTime?.() ?? 0);
+        if (t >= endSeconds) {
+          player.pauseVideo?.();
+          player.seekTo?.(startSeconds, true);
+          setElapsed(0);
+          if (!endedOnceRef.current) {
+            endedOnceRef.current = true;
+            onEnded?.();
+          }
+          return;
+        }
+        const pos = Math.max(0, t - startSeconds);
+        setElapsed(Math.min(duration, pos));
+      } catch {}
+    }, 500);
+    return () => clearInterval(id);
+  }, [player, startSeconds, endSeconds, duration, onEnded]);
+
+  const fraction = duration > 0 ? Math.max(0, Math.min(1, elapsed / duration)) : 0;
+
+  return (
+    <div className="px-4 py-3 border-t border-zinc-800 bg-black/20">
+      <button
+        type="button"
+        onClick={(e) => {
+          if (!player || duration <= 0) return;
+          const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+          const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+          const seekPos = (x / rect.width) * duration;
+          try {
+            player.seekTo?.(startSeconds + seekPos, true);
+          } catch {}
+          setElapsed(Math.max(0, Math.min(duration, seekPos)));
+        }}
+        className="block w-full"
+        aria-label="Seek clip"
+      >
+        <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden">
+          <div className="h-full bg-white/70" style={{ width: `${fraction * 100}%` }} />
+        </div>
+      </button>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+        <div className="text-xs font-semibold text-zinc-200 tabular-nums">
+          {formatMMSS(elapsed)} / {formatMMSS(duration)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FeedVideoPlayer({
+  clipId,
+  videoId,
+  startSeconds,
+  endSeconds,
+  isPlaying,
+  onTogglePlay,
+  onEnded,
+}: {
+  clipId: string;
+  videoId: string;
+  startSeconds: number;
+  endSeconds?: number;
+  isPlaying: boolean;
+  onTogglePlay: () => void;
+  onEnded: () => void;
+}) {
+  const [player, setPlayer] = useState<any>(null);
+  useEffect(() => {
+    if (!clipId || !player) return;
+    feedPlayerByClipId.set(String(clipId), player);
+    return () => {
+      const current = feedPlayerByClipId.get(String(clipId));
+      if (current === player) feedPlayerByClipId.delete(String(clipId));
+    };
+  }, [clipId, player]);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onTogglePlay}
+        className="block w-full text-left"
+        aria-label={isPlaying ? "Stop clip" : "Play clip"}
+      >
+        <div className="relative aspect-video w-full bg-zinc-950 overflow-hidden">
+          {isPlaying ? (
+            <ClipYouTubePlayer
+              videoId={videoId}
+              startTime={startSeconds}
+              endTime={endSeconds}
+              onPlayerReady={(p) => setPlayer(p)}
+              onClipEnded={onEnded}
+            />
+          ) : (
+            <>
+              <img
+                src={`https://img.youtube.com/vi/${videoId}/mqdefault.jpg`}
+                alt="Video thumbnail"
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-black/10 group-hover:bg-black/30 transition-colors" />
+              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="w-16 h-16 rounded-full bg-black/40 border border-white/25 backdrop-blur-sm flex items-center justify-center">
+                  <div
+                    className="ml-1"
+                    style={{
+                      width: 0,
+                      height: 0,
+                      borderLeft: "18px solid white",
+                      borderTop: "12px solid transparent",
+                      borderBottom: "12px solid transparent",
+                    }}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </button>
+      {isPlaying && player ? (
+        <VideoClipControls player={player} startSeconds={startSeconds} endSeconds={endSeconds} onEnded={onEnded} />
+      ) : null}
+    </div>
+  );
+}
+
 function AudioOnlyYouTubePlayer({
   videoId,
   startSeconds,
   endSeconds,
   shouldPlay,
+  onPlayerReady,
+  onClipEnded,
 }: {
   videoId: string;
   startSeconds: number;
   endSeconds?: number;
   shouldPlay: boolean;
+  onPlayerReady?: (player: any) => void;
+  onClipEnded?: () => void;
 }) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<any>(null);
@@ -199,6 +365,9 @@ function AudioOnlyYouTubePlayer({
         events: {
           onReady: (e: any) => {
             playerRef.current = e?.target;
+            try {
+              onPlayerReady?.(playerRef.current);
+            } catch {}
             setReadyNonce((v) => v + 1);
           },
         },
@@ -233,13 +402,16 @@ function AudioOnlyYouTubePlayer({
       try {
         const t = player.getCurrentTime?.() ?? 0;
         if (t >= endSeconds) {
+          try {
+            onClipEnded?.();
+          } catch {}
           player.pauseVideo?.();
           player.seekTo?.(startSeconds, true);
         }
       } catch {}
     }, 250);
     return () => clearInterval(id);
-  }, [shouldPlay, startSeconds, endSeconds, readyNonce]);
+  }, [shouldPlay, startSeconds, endSeconds, readyNonce, onClipEnded]);
 
   return (
     <div
@@ -247,6 +419,183 @@ function AudioOnlyYouTubePlayer({
       className="absolute top-0 left-0 w-px h-px opacity-0 pointer-events-none"
       aria-hidden
     />
+  );
+}
+
+function formatMMSS(totalSeconds: number) {
+  const s = Math.max(0, Math.floor(totalSeconds || 0));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+function AudioOnlyPlayerCard({
+  videoId,
+  startSeconds,
+  endSeconds,
+  shouldPlay,
+  onTogglePlay,
+  onEnded,
+}: {
+  videoId: string;
+  startSeconds: number;
+  endSeconds?: number;
+  shouldPlay: boolean;
+  onTogglePlay: () => void;
+  onEnded?: () => void;
+}) {
+  const [player, setPlayer] = useState<any>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const endedOnceRef = useRef(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
+
+  const duration = useMemo(() => {
+    if (endSeconds == null) return 0;
+    return Math.max(0, Number(endSeconds) - Number(startSeconds));
+  }, [endSeconds, startSeconds]);
+
+  useEffect(() => {
+    if (!player) return;
+    try {
+      player.setPlaybackRate?.(playbackRate);
+    } catch {}
+  }, [player, playbackRate]);
+
+  useEffect(() => {
+    if (!shouldPlay) {
+      setElapsed(0);
+      endedOnceRef.current = false;
+      return;
+    }
+    if (!player || endSeconds == null || endSeconds <= startSeconds) return;
+
+    const id = setInterval(() => {
+      try {
+        const t = Number(player.getCurrentTime?.() ?? 0);
+        if (t >= endSeconds) {
+          player.pauseVideo?.();
+          player.seekTo?.(startSeconds, true);
+          setElapsed(0);
+          if (!endedOnceRef.current) {
+            endedOnceRef.current = true;
+            onEnded?.();
+          }
+          return;
+        }
+        const pos = Math.max(0, t - startSeconds);
+        setElapsed(Math.min(duration, pos));
+      } catch {}
+    }, 500);
+
+    return () => clearInterval(id);
+  }, [shouldPlay, player, startSeconds, endSeconds, duration, onEnded]);
+
+  const fraction = duration > 0 ? Math.max(0, Math.min(1, elapsed / duration)) : 0;
+  const thumb = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+
+  return (
+    <div className="absolute inset-0">
+      <AudioOnlyYouTubePlayer
+        videoId={videoId}
+        startSeconds={startSeconds}
+        endSeconds={endSeconds}
+        shouldPlay={shouldPlay}
+        onPlayerReady={(p) => setPlayer(p)}
+        onClipEnded={() => {
+          if (endedOnceRef.current) return;
+          endedOnceRef.current = true;
+          setElapsed(0);
+          onEnded?.();
+        }}
+      />
+
+      <div className="absolute inset-0">
+        {/* Cover thumbnail */}
+        <img
+          src={thumb}
+          alt={shouldPlay ? "Playing audio clip" : "Audio clip cover"}
+          className="absolute inset-0 h-full w-full object-cover"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
+          }}
+        />
+        <div className="absolute inset-0 bg-black/55" />
+
+        {/* Center play/pause */}
+        <button
+          type="button"
+          onClick={() => {
+            try {
+              if (player) {
+                player.setPlaybackRate?.(playbackRate);
+                if (shouldPlay) player.pauseVideo?.();
+                else {
+                  player.seekTo?.(startSeconds, true);
+                  player.playVideo?.();
+                }
+              }
+            } catch {}
+            onTogglePlay();
+          }}
+          className="absolute inset-0 flex items-center justify-center"
+          aria-label={shouldPlay ? "Pause audio clip" : "Play audio clip"}
+        >
+          <span className="inline-flex h-16 w-16 items-center justify-center rounded-full border border-white/25 bg-black/35 text-white backdrop-blur-sm">
+            <span aria-hidden className="text-xl font-semibold">
+              {shouldPlay ? "❚❚" : "▶"}
+            </span>
+          </span>
+        </button>
+
+        {/* Controls below */}
+        <div className="absolute left-0 right-0 bottom-0 p-3">
+          <div className="rounded-2xl border border-white/15 bg-black/45 backdrop-blur-md p-3">
+            <button
+              type="button"
+              onClick={(e) => {
+                if (!player || duration <= 0) return;
+                const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+                const seekPos = (x / rect.width) * duration;
+                try {
+                  player.seekTo?.(startSeconds + seekPos, true);
+                } catch {}
+                setElapsed(Math.max(0, Math.min(duration, seekPos)));
+              }}
+              className="block w-full"
+              aria-label="Seek audio clip"
+            >
+              <div className="h-2 w-full rounded-full bg-white/15 overflow-hidden">
+                <div className="h-full bg-white/75" style={{ width: `${fraction * 100}%` }} />
+              </div>
+            </button>
+
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <div className="text-xs font-semibold text-zinc-200 tabular-nums">
+                {formatMMSS(elapsed)} / {formatMMSS(duration)}
+              </div>
+              <div className="flex items-center gap-1.5">
+                {[0.75, 1, 1.25, 1.5, 2].map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setPlaybackRate(r)}
+                    className={`rounded-full border px-2 py-1 text-[11px] font-semibold transition-colors ${
+                      playbackRate === r
+                        ? "border-white/30 bg-white text-black"
+                        : "border-white/15 bg-white/5 text-zinc-200 hover:bg-white/10"
+                    }`}
+                    aria-label={`Set speed ${r}x`}
+                  >
+                    {r}x
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -338,6 +687,7 @@ export default function CuratdMVP() {
   const hadAuthenticatedUser = useRef(false);
   const [playingMoment, setPlayingMoment] = useState<{ clipId: string; momentId: string } | null>(null);
   const [topicSearch, setTopicSearch] = useState("");
+  const [curatorSearch, setCuratorSearch] = useState("");
   const [usernamesByUid, setUsernamesByUid] = useState<Record<string, string>>({});
   const [activeFeedTab, setActiveFeedTab] = useState<"explore" | "following">("explore");
   const [followingUserIds, setFollowingUserIds] = useState<string[]>([]);
@@ -367,6 +717,7 @@ export default function CuratdMVP() {
   const [inlineCustomTopicDraft, setInlineCustomTopicDraft] = useState("");
   const [inlineSubmitting, setInlineSubmitting] = useState(false);
   const [likesByClipId, setLikesByClipId] = useState<Record<string, { count: number; liked: boolean }>>({});
+  const [repostsByClipId, setRepostsByClipId] = useState<Record<string, { count: number; reposted: boolean }>>({});
   const [reactionsByClipId, setReactionsByClipId] = useState<
     Record<string, { counts: Record<string, number>; mine: string | null }>
   >({});
@@ -376,6 +727,7 @@ export default function CuratdMVP() {
   const [commentDraftByClipId, setCommentDraftByClipId] = useState<Record<string, string>>({});
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [onboardingStep, setOnboardingStep] = useState<1 | 2 | null>(null);
+  const [visitorSelectedCurators, setVisitorSelectedCurators] = useState<string[]>([]);
   const [curatorTopicsDraft, setCuratorTopicsDraft] = useState<string[]>([]);
   const [curatorTopicsSaving, setCuratorTopicsSaving] = useState(false);
   const [postFirstClipTopicsOpen, setPostFirstClipTopicsOpen] = useState(false);
@@ -433,19 +785,32 @@ export default function CuratdMVP() {
       const parsed = raw ? (JSON.parse(raw) as unknown) : null;
       const topics = Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string") : [];
       setSelectedTopics(topics);
+      const rawCurators = window.localStorage.getItem("selectedCurators");
+      const parsedCurators = rawCurators ? (JSON.parse(rawCurators) as unknown) : null;
+      const curators = Array.isArray(parsedCurators)
+        ? parsedCurators.filter((t): t is string => typeof t === "string")
+        : [];
+      setVisitorSelectedCurators(curators);
       const completed = window.localStorage.getItem("onboardingComplete") === "1";
-      if (!completed) setOnboardingStep(1);
+      if (!user && !completed) setOnboardingStep(1);
     } catch {
       setSelectedTopics([]);
-      setOnboardingStep(1);
+      setVisitorSelectedCurators([]);
+      if (!user) setOnboardingStep(1);
     }
-  }, []);
+  }, [user]);
+
+  useEffect(() => {
+    if (user) setOnboardingStep(null);
+  }, [user]);
 
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       const topicFromUrl = params.get("topic");
       if (topicFromUrl) setTopicSearch(topicFromUrl);
+      const curatorFromUrl = params.get("curator");
+      if (curatorFromUrl) setCuratorSearch(curatorFromUrl);
     } catch {}
   }, []);
 
@@ -703,6 +1068,40 @@ export default function CuratdMVP() {
     }
   };
 
+  const toggleRepost = async (clip: any) => {
+    const clipId = String(clip?.id || "");
+    if (!clipId) return;
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+    const current = repostsByClipId[clipId]?.reposted;
+    const repostId = `${clipId}_${user.uid}`;
+    const refRepost = doc(db, "reposts", repostId);
+    try {
+      if (current) {
+        await deleteDoc(refRepost);
+        try {
+          await updateDoc(doc(db, "clips", clipId), { repostCount: increment(-1) });
+        } catch {}
+      } else {
+        await setDoc(refRepost, {
+          originalClipId: clipId,
+          originalCuratorId: String(clip?.userId || ""),
+          repostedByUid: user.uid,
+          repostedByUsername: username ?? null,
+          repostedBy: { uid: user.uid, username: username ?? null },
+          repostedAt: serverTimestamp(),
+        });
+        try {
+          await updateDoc(doc(db, "clips", clipId), { repostCount: increment(1) });
+        } catch {}
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const setReaction = async (clipId: string, type: "🔥" | "🧠" | "💎") => {
     if (!user) {
       setShowAuthModal(true);
@@ -886,6 +1285,7 @@ export default function CuratdMVP() {
     setTitle("");
     setChannel("");
     setTopic("");
+    setTopicInput("");
     setAudioOnly(false);
     setEditingClipId(null);
     setShowForm(false);
@@ -941,7 +1341,8 @@ export default function CuratdMVP() {
     if (!user) return alert("Please sign in to save clips");
     if (!url) return alert("Please paste a YouTube URL");
     if (!title) return alert("Please add a title");
-    const normalizedTopic = normalizeTopicName(topic);
+    const customTopic = normalizeTopicName(topicInput);
+    const normalizedTopic = customTopic || normalizeTopicName(topic);
     if (!normalizedTopic) return alert("Please choose a topic");
     const totalStart = (parseInt(startMin) || 0) * 60 + (parseInt(startSec) || 0);
     const totalEnd = (parseInt(endMin) || 0) * 60 + (parseInt(endSec) || 0);
@@ -1193,6 +1594,9 @@ export default function CuratdMVP() {
 
   const filtered = useMemo(() => {
     const topicSet = new Set(selectedTopics.map((t) => t.toLowerCase()));
+    const hasVisitorTopics = topicSet.size > 0;
+    const curatorSet = new Set(visitorSelectedCurators.map((id) => String(id)));
+    const hasVisitorCurators = curatorSet.size > 0;
     const matchesSelectedTopics = (c: any) => {
       if (topicSet.size === 0) return true;
       const ms = Array.isArray(c?.moments) ? c.moments : null;
@@ -1202,10 +1606,26 @@ export default function CuratdMVP() {
           : [typeof c?.topic === "string" ? c.topic : ""].filter(Boolean);
       return topics.some((t) => topicSet.has(String(t).toLowerCase()));
     };
+    const matchesVisitorTopics = (c: any) => (hasVisitorTopics ? matchesSelectedTopics(c) : false);
+    const matchesSelectedCurators = (c: any) => {
+      if (curatorSet.size === 0) return false;
+      const uid = String(c?.userId || "");
+      return curatorSet.has(uid);
+    };
+    const prioritizeVisitor = (rows: any[]) => {
+      if (!hasVisitorTopics && !hasVisitorCurators) return rows;
+      const yes: any[] = [];
+      const no: any[] = [];
+      for (const c of rows) {
+        if (matchesVisitorTopics(c) || matchesSelectedCurators(c)) yes.push(c);
+        else no.push(c);
+      }
+      return [...yes, ...no];
+    };
 
     let base: any[] = [];
     if (!user) {
-      base = clips.filter((c) => matchesSelectedTopics(c));
+      base = prioritizeVisitor(clips);
     } else if (activeFeedTab === "following") {
       if (followingUserIds.length === 0) {
         base = clips.filter((c) => matchesSelectedTopics(c));
@@ -1225,16 +1645,29 @@ export default function CuratdMVP() {
     }
     const bySaved = showSaved ? base.filter((c) => savedClips.includes(c.id)) : base;
     const q = topicSearch.trim().toLowerCase();
-    if (!q) return bySaved;
+    const curatorQ = curatorSearch.trim().toLowerCase();
+    const matchesCurator = (c: any) => {
+      if (!curatorQ) return true;
+      const uid = String(c?.userId || "").toLowerCase();
+      const u1 = typeof c?.username === "string" ? c.username.trim().toLowerCase() : "";
+      const u2 =
+        typeof c?.userId === "string" && usernamesByUid[String(c.userId)]
+          ? String(usernamesByUid[String(c.userId)]).trim().toLowerCase()
+          : "";
+      return curatorQ === uid || curatorQ === u1 || curatorQ === u2;
+    };
+
+    if (!q && !curatorQ) return bySaved;
     return bySaved.filter((c) => {
       const ms = Array.isArray(c?.moments) ? c.moments : null;
       const topics: string[] =
         ms && ms.length > 0
           ? ms.map((m: any) => (typeof m?.topic === "string" ? m.topic : "")).filter(Boolean)
           : [typeof c?.topic === "string" ? c.topic : ""].filter(Boolean);
-      return topics.some((t) => t.toLowerCase().includes(q));
+      const topicOk = !q || topics.some((t) => t.toLowerCase().includes(q));
+      return topicOk && matchesCurator(c);
     });
-  }, [clips, followingClips, activeFeedTab, showSaved, savedClips, topicSearch, selectedTopics, user?.uid, followingUserIds]);
+  }, [clips, followingClips, activeFeedTab, showSaved, savedClips, topicSearch, curatorSearch, usernamesByUid, selectedTopics, visitorSelectedCurators, user?.uid, followingUserIds]);
 
   useEffect(() => {
     // Keep subscriptions bounded to currently visible clips.
@@ -1279,6 +1712,26 @@ export default function CuratdMVP() {
               ...prev,
               [clipId]: { counts: { "🔥": 0, "🧠": 0, "💎": 0 }, mine: null },
             }));
+          },
+        ),
+      );
+
+      const repostsQ = query(collection(db, "reposts"), where("originalClipId", "==", clipId));
+      unsubs.push(
+        onSnapshot(
+          repostsQ,
+          (snap) => {
+            let mine = false;
+            for (const d of snap.docs) {
+              const data = d.data() as any;
+              if (user?.uid && String(data?.repostedByUid || "") === user.uid) {
+                mine = true;
+              }
+            }
+            setRepostsByClipId((prev) => ({ ...prev, [clipId]: { count: snap.size, reposted: mine } }));
+          },
+          () => {
+            setRepostsByClipId((prev) => ({ ...prev, [clipId]: { count: 0, reposted: false } }));
           },
         ),
       );
@@ -1378,8 +1831,22 @@ export default function CuratdMVP() {
     try {
       window.localStorage.setItem("onboardingComplete", "1");
       window.localStorage.setItem("selectedTopics", JSON.stringify(selectedTopics));
+      window.localStorage.setItem("selectedCurators", JSON.stringify(visitorSelectedCurators));
     } catch {}
     setOnboardingStep(null);
+  };
+
+  const toggleVisitorCurator = (uid: string) => {
+    const id = String(uid || "");
+    if (!id) return;
+    setVisitorSelectedCurators((prev) => {
+      const has = prev.includes(id);
+      const next = has ? prev.filter((x) => x !== id) : [...prev, id];
+      try {
+        window.localStorage.setItem("selectedCurators", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
   };
 
   const toggleSelectedTopic = (topic: string) => {
@@ -1524,7 +1991,7 @@ export default function CuratdMVP() {
           currentUsername={username ?? ""}
         />
       ) : null}
-      {onboardingStep != null ? (
+      {onboardingStep != null && !user ? (
         <div className="fixed inset-0 z-[220] bg-black text-white">
           {onboardingStep === 1 ? (
             <div className="h-full max-w-3xl mx-auto px-6 py-10 flex flex-col">
@@ -1552,6 +2019,21 @@ export default function CuratdMVP() {
               <div className="mt-auto">
                 <button
                   type="button"
+                  onClick={() => {
+                    try {
+                      window.localStorage.setItem("selectedTopics", JSON.stringify([]));
+                      window.localStorage.setItem("selectedCurators", JSON.stringify([]));
+                    } catch {}
+                    setSelectedTopics([]);
+                    setVisitorSelectedCurators([]);
+                    finishOnboarding();
+                  }}
+                  className="mb-3 text-left text-sm font-semibold text-zinc-300 hover:text-white"
+                >
+                  Skip →
+                </button>
+                <button
+                  type="button"
                   disabled={selectedTopics.length === 0}
                   onClick={() => setOnboardingStep(2)}
                   className={`w-full rounded-xl py-3.5 text-sm font-bold ${
@@ -1567,11 +2049,10 @@ export default function CuratdMVP() {
           ) : (
             <div className="h-full max-w-4xl mx-auto px-6 py-10 flex flex-col">
               <h1 className="text-3xl font-bold">Curators you might like</h1>
-              <p className="text-zinc-400 mt-2">Follow a few to personalize your feed.</p>
+              <p className="text-zinc-400 mt-2">Pick a few to personalize your feed.</p>
               <div className="mt-8 grid gap-3">
                 {suggestedCurators.map((c) => {
-                  const following = followingUserIds.includes(c.uid);
-                  const busy = Boolean(followBusyByUid[c.uid]);
+                  const selected = visitorSelectedCurators.includes(c.uid);
                   return (
                     <div key={c.uid} className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4 flex items-center gap-3">
                       {c.photoURL ? (
@@ -1592,13 +2073,12 @@ export default function CuratdMVP() {
                       </div>
                       <button
                         type="button"
-                        disabled={busy}
-                        onClick={() => void toggleFollowUser(c.uid)}
+                        onClick={() => toggleVisitorCurator(c.uid)}
                         className={`rounded-full px-4 py-2 text-sm font-semibold border transition-colors ${
-                          following ? "border-emerald-500 bg-emerald-500 text-black" : "border-zinc-400 text-white hover:border-white"
+                          selected ? "border-emerald-500 bg-emerald-500 text-black" : "border-zinc-400 text-white hover:border-white"
                         }`}
                       >
-                        {following ? "Following" : "Follow"}
+                        {selected ? "Selected" : "Select"}
                       </button>
                     </div>
                   );
@@ -1683,14 +2163,14 @@ export default function CuratdMVP() {
           </div>
         </div>
       ) : null}
-      <header className="shrink-0 h-14 border-b border-zinc-800 grid grid-cols-[minmax(0,auto)_1fr_minmax(0,auto)] items-center gap-4 px-4 bg-black">
-        <Link href="/" className="text-sm font-bold tracking-tight text-white hover:text-zinc-200 transition-colors shrink-0">
+      <header className="shrink-0 border-b border-zinc-800 bg-black px-4 py-3 flex flex-wrap items-center gap-3 md:py-0 md:h-14 md:grid md:grid-cols-[minmax(0,auto)_1fr_minmax(0,auto)] md:items-center md:gap-4">
+        <Link href="/" className="text-sm font-bold tracking-tight text-white hover:text-zinc-200 transition-colors shrink-0 order-1">
           CURATD
         </Link>
-        <div className="flex min-w-0 justify-center px-2">
+        <div className="flex w-full min-w-0 justify-center md:w-auto md:px-2 order-3 md:order-none">
           <CuratorSearchBar />
         </div>
-        <div className="flex items-center gap-2 min-w-0 justify-self-end" ref={navMenuRef}>
+        <div className="flex items-center gap-2 min-w-0 justify-self-end order-2 ml-auto md:order-none md:ml-0" ref={navMenuRef}>
           {user ? (
             <>
               <button
@@ -1838,7 +2318,7 @@ export default function CuratdMVP() {
 
       <div className="flex flex-1 min-h-0">
       {/* Left icon sidebar */}
-      <aside className="w-14 border-r border-zinc-800 flex flex-col items-center py-4 gap-3 shrink-0">
+      <aside className="hidden md:flex w-14 border-r border-zinc-800 flex-col items-center py-4 gap-3 shrink-0">
         <button
           type="button"
           onClick={() => {
@@ -1874,7 +2354,7 @@ export default function CuratdMVP() {
       </aside>
 
       {/* Middle sidebar */}
-      <aside className="w-[220px] border-r border-zinc-800 px-5 py-5 overflow-y-auto">
+      <aside className="hidden md:block w-[220px] border-r border-zinc-800 px-5 py-5 overflow-y-auto">
         <div className="space-y-8">
           {activeFeedTab === "following" && user ? (
             <section className="border-b border-zinc-800/80 pb-4">
@@ -2042,8 +2522,8 @@ export default function CuratdMVP() {
 
       {/* Main content */}
       <main className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-6 py-6">
-          <div className="flex items-center gap-6 border-b border-zinc-800 pb-3 mb-6">
+        <div className="w-full max-w-none md:max-w-3xl mx-auto px-4 md:px-6 py-6">
+          <div className="flex w-full items-center justify-center md:justify-start gap-3 md:gap-6 border-b border-zinc-800 pb-3 mb-6">
             <button
               type="button"
               onClick={() => {
@@ -2051,7 +2531,7 @@ export default function CuratdMVP() {
                 setShowSaved(false);
                 setPlayingMoment(null);
               }}
-              className={`pb-2 text-sm font-semibold transition-colors border-b-2 ${
+              className={`flex-1 md:flex-none text-center md:text-left pb-2 text-sm font-semibold transition-colors border-b-2 ${
                 activeFeedTab === "explore"
                   ? "border-white text-white"
                   : "border-transparent text-zinc-500 hover:text-zinc-200"
@@ -2070,7 +2550,7 @@ export default function CuratdMVP() {
                 setShowSaved(false);
                 setPlayingMoment(null);
               }}
-              className={`pb-2 text-sm font-semibold transition-colors border-b-2 ${
+              className={`flex-1 md:flex-none text-center md:text-left pb-2 text-sm font-semibold transition-colors border-b-2 ${
                 activeFeedTab === "following"
                   ? "border-white text-white"
                   : "border-transparent text-zinc-500 hover:text-zinc-200"
@@ -2088,9 +2568,7 @@ export default function CuratdMVP() {
                 <button
                   type="button"
                   onClick={() => {
-                    setActiveFeedTab("explore");
-                    setShowSaved(false);
-                    setTopicSearch("");
+                    router.push("/discover");
                   }}
                   className="mt-5 rounded-full bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200 transition-colors"
                 >
@@ -2166,7 +2644,7 @@ export default function CuratdMVP() {
                         ) : null}
                         <div className="absolute inset-0 bg-black/65" />
                         {vid ? (
-                          <AudioOnlyYouTubePlayer
+                          <AudioOnlyPlayerCard
                             videoId={vid}
                             startSeconds={(() => {
                               const selected = moments.find((m: any) => String(m?.id) === String(playingMoment?.momentId));
@@ -2177,81 +2655,49 @@ export default function CuratdMVP() {
                               return selected?.endTime ?? primaryMoment?.endTime ?? undefined;
                             })()}
                             shouldPlay={isPlaying}
-                          />
-                        ) : null}
-                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-                          <div className="text-6xl leading-none select-none">🎧</div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!vid) return;
+                            onTogglePlay={() => {
                               setPlayingMoment((prev) => {
                                 if (prev?.clipId === clip.id) return null;
                                 return { clipId: clip.id, momentId: String(primaryMoment?.id || "primary") };
                               });
                             }}
-                            className="rounded-full border border-white/30 bg-white/15 px-5 py-2 text-sm font-semibold text-white backdrop-blur-sm hover:bg-white/25 transition-colors"
-                            aria-label={isPlaying ? "Pause audio clip" : "Play audio clip"}
-                          >
-                            {isPlaying ? "Pause" : "Play"}
-                          </button>
-                        </div>
+                            onEnded={() => {
+                              setPlayingMoment((prev) => (prev?.clipId === clip.id ? null : prev));
+                            }}
+                          />
+                        ) : null}
                       </div>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!vid) return;
-                          setPlayingMoment((prev) => {
-                            if (prev?.clipId === clip.id) return null;
-                            return { clipId: clip.id, momentId: String(primaryMoment?.id || "primary") };
-                          });
-                        }}
-                        className="block w-full text-left"
-                        aria-label={isPlaying ? "Stop clip" : "Play clip"}
-                      >
-                        <div className="relative aspect-video w-full bg-zinc-950 border-b border-zinc-800 rounded-t-2xl overflow-hidden">
-                          {isPlaying && vid ? (
-                            <ClipYouTubePlayer
-                              videoId={vid}
-                              startTime={(() => {
-                                const selected = moments.find((m: any) => String(m?.id) === String(playingMoment?.momentId));
-                                return selected?.startTime ?? primaryMoment?.startTime ?? 0;
-                              })()}
-                              endTime={(() => {
-                                const selected = moments.find((m: any) => String(m?.id) === String(playingMoment?.momentId));
-                                return selected?.endTime ?? primaryMoment?.endTime ?? undefined;
-                              })()}
-                            />
-                          ) : (
-                            <>
-                              {vid ? (
-                                <img
-                                  src={`https://img.youtube.com/vi/${vid}/mqdefault.jpg`}
-                                  alt={clip.title || 'Video thumbnail'}
-                                  className="absolute inset-0 w-full h-full object-cover"
-                                />
-                              ) : null}
-
-                              <div className="absolute inset-0 bg-black/10 group-hover:bg-black/30 transition-colors" />
-                              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                <div className="w-16 h-16 rounded-full bg-black/40 border border-white/25 backdrop-blur-sm flex items-center justify-center">
-                                  <div
-                                    className="ml-1"
-                                    style={{
-                                      width: 0,
-                                      height: 0,
-                                      borderLeft: '18px solid white',
-                                      borderTop: '12px solid transparent',
-                                      borderBottom: '12px solid transparent',
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </button>
+                      <div className="w-full border-b border-zinc-800 rounded-t-2xl overflow-hidden">
+                        {vid ? (
+                          <FeedVideoPlayer
+                            clipId={String(clip.id)}
+                            videoId={vid}
+                            startSeconds={(() => {
+                              const selected = moments.find((m: any) => String(m?.id) === String(playingMoment?.momentId));
+                              return selected?.startTime ?? primaryMoment?.startTime ?? 0;
+                            })()}
+                            endSeconds={(() => {
+                              const selected = moments.find((m: any) => String(m?.id) === String(playingMoment?.momentId));
+                              return selected?.endTime ?? primaryMoment?.endTime ?? undefined;
+                            })()}
+                            isPlaying={isPlaying}
+                            onTogglePlay={() => {
+                              setPlayingMoment((prev) => {
+                                if (prev?.clipId === clip.id) return null;
+                                return { clipId: clip.id, momentId: String(primaryMoment?.id || "primary") };
+                              });
+                            }}
+                            onEnded={() => {
+                              setPlayingMoment((prev) => (prev?.clipId === clip.id ? null : prev));
+                            }}
+                          />
+                        ) : (
+                          <div className="aspect-video w-full bg-zinc-950 flex items-center justify-center text-sm text-zinc-500">
+                            Video unavailable
+                          </div>
+                        )}
+                      </div>
                     )}
 
                     {/* Text content */}
@@ -2371,7 +2817,7 @@ export default function CuratdMVP() {
                           ) : null}
 
                           {/* Likes + reactions */}
-                          <div className="mt-4 flex items-center gap-3">
+                          <div className="mt-4 flex flex-wrap items-center gap-3">
                             <button
                               type="button"
                               onClick={() => void toggleLike(String(clip.id))}
@@ -2387,6 +2833,22 @@ export default function CuratdMVP() {
                                 {likesByClipId[String(clip.id)]?.liked ? "♥" : "♡"}
                               </span>
                               <span>{likesByClipId[String(clip.id)]?.count ?? 0}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => void toggleRepost(clip)}
+                              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full border transition-colors ${
+                                repostsByClipId[String(clip.id)]?.reposted
+                                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                                  : "border-zinc-800 bg-black/20 text-zinc-400 hover:text-white hover:bg-zinc-900/40"
+                              }`}
+                              aria-label="Repost"
+                              title="Repost"
+                            >
+                              <span aria-hidden>🔁</span>
+                              <span>Repost</span>
+                              <span>{repostsByClipId[String(clip.id)]?.count ?? 0}</span>
                             </button>
 
                             {(["🔥", "🧠", "💎"] as const).map((r) => {
@@ -2640,12 +3102,26 @@ export default function CuratdMVP() {
                                 tabIndex={vid ? 0 : -1}
                                 onClick={() => {
                                   if (!vid) return;
+                                  try {
+                                    const p = feedPlayerByClipId.get(String(clip.id));
+                                    if (p) {
+                                      p.seekTo?.(Number(m?.startTime || 0), true);
+                                      p.playVideo?.();
+                                    }
+                                  } catch {}
                                   setPlayingMoment({ clipId: clip.id, momentId: mid });
                                 }}
                                 onKeyDown={(e) => {
                                   if (!vid) return;
                                   if (e.key === "Enter" || e.key === " ") {
                                     e.preventDefault();
+                                    try {
+                                      const p = feedPlayerByClipId.get(String(clip.id));
+                                      if (p) {
+                                        p.seekTo?.(Number(m?.startTime || 0), true);
+                                        p.playVideo?.();
+                                      }
+                                    } catch {}
                                     setPlayingMoment({ clipId: clip.id, momentId: mid });
                                   }
                                 }}

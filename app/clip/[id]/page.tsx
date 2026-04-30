@@ -3,6 +3,8 @@ import Link from "next/link";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../../firebase";
 import { SharedClipPlayer } from "./shared-clip-player";
+import { RepostButton } from "./repost-button";
+import { ShareActionsRow } from "./share-actions-row";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -124,7 +126,7 @@ export default async function SharedClipPage({ params, searchParams }: Props) {
   const { id } = await params;
   const sp = await searchParams;
   const audioParam = sp?.audio;
-  const audioOnly =
+  const audioOnlyFromParam =
     audioParam === "1" ||
     audioParam === "true" ||
     (Array.isArray(audioParam) && audioParam.some((v) => v === "1" || v === "true"));
@@ -149,6 +151,7 @@ export default async function SharedClipPage({ params, searchParams }: Props) {
     );
   }
 
+  const audioOnly = audioOnlyFromParam || (clip as any)?.audioOnly === true;
   const videoId = clip.videoId || extractVideoId(clip.videoUrl || clip.url);
   const primary = getPrimaryMoment(clip);
   const startSeconds = Math.max(0, Number(primary?.startTime ?? clip.startTime ?? 0) || 0);
@@ -177,63 +180,88 @@ export default async function SharedClipPage({ params, searchParams }: Props) {
           </Link>
         </div>
 
-        {videoId ? (
-          <SharedClipPlayer
-            videoId={videoId}
-            startTime={startSeconds}
-            endTime={endSeconds}
-            audioOnly={audioOnly}
-            videoTitle={clip.title || "Untitled clip"}
-            curatorUsername={clip.username}
-          />
-        ) : (
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-950 px-6 py-16 text-center text-sm text-zinc-500">
-            Video unavailable (missing YouTube ID).
-          </div>
-        )}
-
-        {noteText ? (
-          <blockquote className="mt-8 border-l-4 border-emerald-500 pl-5 text-lg font-medium leading-relaxed text-zinc-100">
-            &ldquo;{noteText}&rdquo;
-          </blockquote>
-        ) : null}
-
-        <div className="mt-8 flex flex-col gap-4 border-t border-zinc-800 pt-8 text-sm">
-          <p className="text-zinc-400">
-            Curated by{" "}
-            {clip.username ? (
-              <Link
-                href={`/${clip.username}`}
-                className="font-semibold text-emerald-400 hover:text-emerald-300 hover:underline"
-              >
-                @{clip.username}
-              </Link>
+        <div
+          className={`group relative rounded-2xl border transition-colors overflow-hidden ${
+            audioOnly ? "bg-zinc-950/80" : "bg-zinc-900/30"
+          } border-zinc-800/70 hover:border-zinc-700`}
+        >
+          {/* Media */}
+          <div className="border-b border-zinc-800 rounded-t-2xl overflow-hidden">
+            {videoId ? (
+              <SharedClipPlayer
+                videoId={videoId}
+                startTime={startSeconds}
+                endTime={endSeconds}
+                audioOnly={audioOnly}
+              />
             ) : (
-              <span className="font-semibold text-zinc-300">Unknown curator</span>
+              <div className="aspect-video w-full bg-zinc-950 px-6 py-16 text-center text-sm text-zinc-500">
+                Video unavailable (missing YouTube ID).
+              </div>
             )}
-          </p>
+          </div>
 
-          {youtubeWatchUrl ? (
-            <p>
-              <a
-                href={youtubeWatchUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-emerald-500 underline-offset-2 hover:text-emerald-400 hover:underline"
-              >
-                Watch full video on YouTube
-              </a>
-            </p>
-          ) : null}
+          {/* Text content */}
+          <div className="p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-lg font-semibold text-white leading-snug line-clamp-2">
+                  {clip.title || "Untitled clip"}
+                </div>
+                <ShareActionsRow clipId={String(clip.id)} originalCuratorId={String(clip.userId || "")} />
+                <div className="text-sm text-zinc-500 mt-1 truncate">
+                  {clip.channelName || clip.channel || "Unknown channel"}
+                </div>
+                {primary?.topic ? (
+                  <div className="flex flex-wrap items-center gap-2 mt-2">
+                    <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                      {primary.topic}
+                    </span>
+                  </div>
+                ) : null}
 
-          {clip.title ? (
-            <p className="text-xs text-zinc-600">
-              {clip.title}
-              {clip.channelName || clip.channel ? (
-                <span className="text-zinc-600"> · {clip.channelName || clip.channel}</span>
-              ) : null}
-            </p>
-          ) : null}
+                <div className="mt-2 text-xs text-zinc-500">
+                  Curated by{" "}
+                  {clip.username ? (
+                    <Link href={`/${clip.username}`} className="font-medium text-zinc-300 hover:underline">
+                      @{clip.username}
+                    </Link>
+                  ) : (
+                    <span className="text-zinc-300 font-medium">Unknown curator</span>
+                  )}
+                </div>
+
+                {audioOnly ? (
+                  <div className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-purple-300/80">
+                    Audio only
+                  </div>
+                ) : null}
+
+                {noteText ? (
+                  <div
+                    className={`mt-4 text-base text-zinc-100 font-medium italic border-l-2 pl-3 line-clamp-3 ${
+                      audioOnly ? "border-purple-500" : "border-emerald-500"
+                    }`}
+                  >
+                    &ldquo;{noteText}&rdquo;
+                  </div>
+                ) : null}
+
+                <div className="mt-4 flex items-center gap-4 text-xs">
+                  {youtubeWatchUrl ? (
+                    <a
+                      href={youtubeWatchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-zinc-500 hover:text-zinc-200 hover:underline underline-offset-2"
+                    >
+                      Watch full video on YouTube
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </main>

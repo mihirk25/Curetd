@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { collection, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
@@ -39,6 +40,7 @@ function extractVideoId(url: string) {
 }
 
 export function CuratorSearchBar() {
+  const router = useRouter();
   const [searchText, setSearchText] = useState("");
   const [debouncedPrefix, setDebouncedPrefix] = useState("");
   const [open, setOpen] = useState(false);
@@ -224,16 +226,15 @@ export function CuratorSearchBar() {
                   </div>
                   {clipHits.map((c) => {
                     const vid = c.videoId || extractVideoId(c.url || "");
-                    const watchUrl = vid
-                      ? `https://www.youtube.com/watch?v=${vid}&t=${Math.max(0, Math.floor(c.startTime || 0))}s`
-                      : c.url || "";
                     return (
                       <button
                         key={c.id}
                         type="button"
                         onClick={() => {
-                          if (watchUrl) window.open(watchUrl, "_blank");
+                          router.push(`/clip/${c.id}`);
                           setOpen(false);
+                          setSearchText("");
+                          setDebouncedPrefix("");
                         }}
                         className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-900/90 transition-colors text-left"
                       >
