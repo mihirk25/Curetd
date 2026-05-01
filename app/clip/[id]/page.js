@@ -1,33 +1,10 @@
-import type { Metadata } from "next";
 import Link from "next/link";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../../firebase";
 import { SharedClipPlayer } from "./shared-clip-player";
 import { ShareActionsRow } from "./share-actions-row";
 
-type Props = {
-  params: { id: string };
-  searchParams?: { audio?: string | string[] };
-};
-
-type ClipDoc = {
-  id: string;
-  url?: string;
-  videoUrl?: string;
-  videoId?: string;
-  title?: string;
-  channel?: string;
-  channelName?: string;
-  note?: string;
-  topic?: string;
-  username?: string | null;
-  userId?: string;
-  startTime?: number;
-  endTime?: number;
-  moments?: any[];
-};
-
-function extractVideoId(url?: string) {
+function extractVideoId(url) {
   if (!url) return null;
   const patterns = [
     /(?:youtube\.com\/watch\?v=)([a-zA-Z0-9_-]{11})/,
@@ -42,11 +19,11 @@ function extractVideoId(url?: string) {
   return null;
 }
 
-function normalizeUsername(value: unknown) {
+function normalizeUsername(value) {
   return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null;
 }
 
-function getPrimaryMoment(clip: ClipDoc) {
+function getPrimaryMoment(clip) {
   const moments = Array.isArray(clip.moments) ? clip.moments : [];
   if (moments.length > 0) return moments[0];
   return {
@@ -57,11 +34,11 @@ function getPrimaryMoment(clip: ClipDoc) {
   };
 }
 
-function clipTopicTags(clip: ClipDoc): string[] {
+function clipTopicTags(clip) {
   const moments = Array.isArray(clip.moments) ? clip.moments : [];
-  const tags = new Set<string>();
+  const tags = new Set();
   for (const m of moments) {
-    const t = typeof m?.topic === "string" ? m.topic.trim() : "";
+    const t = typeof (m == null ? undefined : m.topic) === "string" ? m.topic.trim() : "";
     if (t) tags.add(t);
   }
   const legacy = typeof clip.topic === "string" ? clip.topic.trim() : "";
@@ -69,12 +46,12 @@ function clipTopicTags(clip: ClipDoc): string[] {
   return [...tags];
 }
 
-async function getClip(id: string): Promise<(ClipDoc & { username: string | null }) | null> {
+async function getClip(id) {
   const snap = await getDoc(doc(db, "clips", id));
   if (!snap.exists()) return null;
 
-  const data = snap.data() as Omit<ClipDoc, "id">;
-  const clip: ClipDoc = { id: snap.id, ...data };
+  const data = snap.data() || {};
+  const clip = { id: snap.id, ...data };
   let username = normalizeUsername(clip.username);
   if (username || !clip.userId) {
     return { ...clip, username };
@@ -83,18 +60,18 @@ async function getClip(id: string): Promise<(ClipDoc & { username: string | null
   try {
     const userSnap = await getDoc(doc(db, "users", clip.userId));
     const userData = userSnap.exists() ? userSnap.data() : null;
-    username = normalizeUsername((userData as { username?: string })?.username);
+    username = normalizeUsername(userData == null ? null : userData.username);
   } catch {
     username = null;
   }
   return { ...clip, username };
 }
 
-function thumbnailUrl(videoId: string | null) {
+function thumbnailUrl(videoId) {
   return videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : undefined;
 }
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params }) {
   const { id } = params;
   const clip = await getClip(id);
   if (!clip) {
@@ -122,16 +99,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       type: "article",
       images: image ? [{ url: image }] : undefined,
     },
-    twitter: {
-      card: "summary_large_image",
-      title,
-      description,
-      images: image ? [image] : undefined,
-    },
   };
 }
 
-function formatTimestamp(totalSeconds: number) {
+function formatTimestamp(totalSeconds) {
   const s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
@@ -140,13 +111,14 @@ function formatTimestamp(totalSeconds: number) {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
-export default async function SharedClipPage({ params, searchParams }: Props) {
+export default async function SharedClipPage({ params, searchParams }) {
   const { id } = params;
-  const audioParam = searchParams?.audio;
+  const audioParam = searchParams == null ? undefined : searchParams.audio;
   const audioOnlyFromParam =
     audioParam === "1" ||
     audioParam === "true" ||
     (Array.isArray(audioParam) && audioParam.some((v) => v === "1" || v === "true"));
+
   const clip = await getClip(id);
 
   if (!clip) {
@@ -168,18 +140,13 @@ export default async function SharedClipPage({ params, searchParams }: Props) {
     );
   }
 
-  const audioOnly = audioOnlyFromParam || (clip as any)?.audioOnly === true;
+  const audioOnly = audioOnlyFromParam || clip.audioOnly === true;
   const videoId = clip.videoId || extractVideoId(clip.videoUrl || clip.url);
   const primary = getPrimaryMoment(clip);
-  const startSeconds = Math.max(0, Number(primary?.startTime ?? clip.startTime ?? 0) || 0);
-  const endRaw = primary?.endTime ?? clip.endTime ?? 0;
-  const endSeconds =
-    typeof endRaw === "number" && endRaw > startSeconds ? endRaw : undefined;
+  const startSeconds = Math.max(0, Number(primary == null ? 0 : primary.startTime ?? clip.startTime ?? 0) || 0);
+  const endRaw = (primary == null ? undefined : primary.endTime) ?? clip.endTime ?? 0;
+  const endSeconds = typeof endRaw === "number" && endRaw > startSeconds ? endRaw : undefined;
   const tags = clipTopicTags(clip);
-  const noteText =
-    (typeof primary?.note === "string" && primary.note.trim()) ||
-    (typeof clip.note === "string" && clip.note.trim()) ||
-    "";
 
   const youtubeWatchUrl =
     videoId != null && videoId !== ""
@@ -203,7 +170,6 @@ export default async function SharedClipPage({ params, searchParams }: Props) {
             audioOnly ? "bg-zinc-950/80" : "bg-zinc-900/30"
           } border-zinc-800/70 hover:border-zinc-700`}
         >
-          {/* Media */}
           <div className="border-b border-zinc-800 rounded-t-2xl overflow-hidden">
             {videoId ? (
               <SharedClipPlayer
@@ -219,22 +185,26 @@ export default async function SharedClipPage({ params, searchParams }: Props) {
             )}
           </div>
 
-          {/* Text content */}
           <div className="p-5">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-lg font-semibold text-white leading-snug line-clamp-2">
                   {clip.title || "Untitled clip"}
                 </div>
+
                 <ShareActionsRow clipId={String(clip.id)} originalCuratorId={String(clip.userId || "")} />
+
                 <div className="text-sm text-zinc-500 mt-1 truncate">
                   {clip.channelName || clip.channel || "Unknown channel"}
                 </div>
+
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <span className="text-[11px] font-mono font-semibold bg-emerald-500 text-white px-2.5 py-0.5 rounded-md">
-                    {formatTimestamp(startSeconds)}{endSeconds != null ? ` – ${formatTimestamp(endSeconds)}` : ""}
+                    {formatTimestamp(startSeconds)}
+                    {endSeconds != null ? ` – ${formatTimestamp(endSeconds)}` : ""}
                   </span>
                 </div>
+
                 {tags.length > 0 ? (
                   <div className="flex flex-wrap items-center gap-2 mt-2">
                     {tags.slice(0, 12).map((t) => (
@@ -265,16 +235,6 @@ export default async function SharedClipPage({ params, searchParams }: Props) {
                   </div>
                 ) : null}
 
-                {noteText ? (
-                  <div
-                    className={`mt-4 text-base text-zinc-100 font-medium italic border-l-2 pl-3 line-clamp-3 ${
-                      audioOnly ? "border-purple-500" : "border-emerald-500"
-                    }`}
-                  >
-                    &ldquo;{noteText}&rdquo;
-                  </div>
-                ) : null}
-
                 <div className="mt-4 flex items-center gap-4 text-xs">
                   {youtubeWatchUrl ? (
                     <a
@@ -295,3 +255,4 @@ export default async function SharedClipPage({ params, searchParams }: Props) {
     </main>
   );
 }
+
