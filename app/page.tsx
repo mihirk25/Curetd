@@ -614,6 +614,50 @@ function extractVideoId(url: string) {
   return null;
 }
 
+function parseYoutubeTimestampSeconds(tRaw: string): number | null {
+  const v = decodeURIComponent(String(tRaw || "").trim());
+  if (!v) return null;
+  if (/^\d+$/.test(v)) return parseInt(v, 10);
+  const m = v.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/i);
+  if (!m) return null;
+  const h = m[1] ? parseInt(m[1], 10) : 0;
+  const min = m[2] ? parseInt(m[2], 10) : 0;
+  const sec = m[3] ? parseInt(m[3], 10) : 0;
+  if (!m[1] && !m[2] && !m[3]) return null;
+  return h * 3600 + min * 60 + sec;
+}
+
+function stripYoutubeTimestampFromUrl(raw: string): { cleaned: string; seconds: number | null } {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return { cleaned: trimmed, seconds: null };
+
+  let addedScheme = false;
+  let parseTarget = trimmed;
+  if (!/^https?:\/\//i.test(parseTarget)) {
+    parseTarget = `https://${parseTarget}`;
+    addedScheme = true;
+  }
+
+  try {
+    const u = new URL(parseTarget);
+    const tParam = u.searchParams.get("t");
+    let seconds: number | null = null;
+    if (tParam != null && tParam !== "") {
+      seconds = parseYoutubeTimestampSeconds(tParam);
+      u.searchParams.delete("t");
+    }
+    let cleaned: string;
+    if (addedScheme) {
+      cleaned = `${u.hostname}${u.pathname}${u.search}${u.hash}`;
+    } else {
+      cleaned = u.toString();
+    }
+    return { cleaned, seconds };
+  } catch {
+    return { cleaned: trimmed, seconds: null };
+  }
+}
+
 function formatRelativeTime(createdAt: any) {
   const ms =
     typeof createdAt?.toMillis === "function"
@@ -656,8 +700,10 @@ export default function CuratdMVP() {
   const router = useRouter();
   const username = user?.username ?? null;
   const [url, setUrl] = useState('');
+  const [startHr, setStartHr] = useState('');
   const [startMin, setStartMin] = useState('');
   const [startSec, setStartSec] = useState('');
+  const [endHr, setEndHr] = useState('');
   const [endMin, setEndMin] = useState('');
   const [endSec, setEndSec] = useState('');
   const [note, setNote] = useState('');
@@ -1277,8 +1323,10 @@ export default function CuratdMVP() {
 
   const resetForm = () => {
     setUrl("");
+    setStartHr("");
     setStartMin("");
     setStartSec("");
+    setEndHr("");
     setEndMin("");
     setEndSec("");
     setNote("");
@@ -1297,8 +1345,10 @@ export default function CuratdMVP() {
       return;
     }
     setUrl("");
+    setStartHr("");
     setStartMin("");
     setStartSec("");
+    setEndHr("");
     setEndMin("");
     setEndSec("");
     setNote("");
@@ -1344,8 +1394,10 @@ export default function CuratdMVP() {
     const customTopic = normalizeTopicName(topicInput);
     const normalizedTopic = customTopic || normalizeTopicName(topic);
     if (!normalizedTopic) return alert("Please choose a topic");
-    const totalStart = (parseInt(startMin) || 0) * 60 + (parseInt(startSec) || 0);
-    const totalEnd = (parseInt(endMin) || 0) * 60 + (parseInt(endSec) || 0);
+    const totalStart =
+      (parseInt(startHr, 10) || 0) * 3600 + (parseInt(startMin, 10) || 0) * 60 + (parseInt(startSec, 10) || 0);
+    const totalEnd =
+      (parseInt(endHr, 10) || 0) * 3600 + (parseInt(endMin, 10) || 0) * 60 + (parseInt(endSec, 10) || 0);
     const videoId = extractVideoId(url);
 
     setLoading(true);
@@ -1463,14 +1515,14 @@ export default function CuratdMVP() {
     setTopicInput(m?.topic || "");
     setAudioOnly(Boolean(clip?.audioOnly));
     setNote(m?.note || "");
-    const sMin = Math.floor(((m?.startTime as number) || 0) / 60);
-    const sSec = (((m?.startTime as number) || 0) % 60);
-    const eMin = Math.floor(((m?.endTime as number) || 0) / 60);
-    const eSec = (((m?.endTime as number) || 0) % 60);
-    setStartMin(sMin.toString());
-    setStartSec(sSec.toString());
-    setEndMin(eMin.toString());
-    setEndSec(eSec.toString());
+    const st = (m?.startTime as number) || 0;
+    const et = (m?.endTime as number) || 0;
+    setStartHr(Math.floor(st / 3600).toString());
+    setStartMin(Math.floor((st % 3600) / 60).toString());
+    setStartSec((st % 60).toString());
+    setEndHr(Math.floor(et / 3600).toString());
+    setEndMin(Math.floor((et % 3600) / 60).toString());
+    setEndSec((et % 60).toString());
     setEditingClipId(clip.id);
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3433,14 +3485,25 @@ export default function CuratdMVP() {
                   type="text" value={url} placeholder="https://youtube.com/watch?v=..."
                   className="w-full bg-black border border-zinc-700 p-3.5 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
                   onChange={(e) => {
-                    const next = e.target.value;
-                    setUrl(next);
-                    const looksLikeYoutube = next.includes("youtube.com") || next.includes("youtu.be");
+                    const raw = e.target.value;
+                    const { cleaned, seconds } = stripYoutubeTimestampFromUrl(raw);
+                    setUrl(cleaned);
+                    if (seconds !== null) {
+                      const t = Math.max(0, Math.floor(seconds));
+                      setStartHr(String(Math.floor(t / 3600)));
+                      setStartMin(String(Math.floor((t % 3600) / 60)));
+                      setStartSec(String(t % 60));
+                    }
+                    const looksLikeYoutube =
+                      cleaned.includes("youtube.com") || cleaned.includes("youtu.be");
                     if (looksLikeYoutube && (!title.trim() || !channel.trim())) {
-                      fetchVideoInfo(next);
+                      fetchVideoInfo(cleaned);
                     }
                   }}
                 />
+                <p className="text-xs text-zinc-600 mt-2">
+                  Tip: copy video URL at current time to auto-fill start time
+                </p>
                 {fetchingInfo && (
                   <div className="text-xs text-zinc-500 mt-2">Fetching info...</div>
                 )}
@@ -3499,15 +3562,65 @@ export default function CuratdMVP() {
                 <div>
                   <label className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-1.5 block">Start Time</label>
                   <div className="flex gap-2">
-                    <input type="number" value={startMin} placeholder="Min" className="w-full bg-black border border-zinc-700 p-3 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm" onChange={(e) => setStartMin(e.target.value)} />
-                    <input type="number" value={startSec} placeholder="Sec" className="w-full bg-black border border-zinc-700 p-3 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm" onChange={(e) => setStartSec(e.target.value)} />
+                    <input
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={startHr}
+                      placeholder="Hr"
+                      className="w-full bg-black border border-zinc-700 p-3 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
+                      onChange={(e) => setStartHr(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={59}
+                      value={startMin}
+                      placeholder="Min"
+                      className="w-full bg-black border border-zinc-700 p-3 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
+                      onChange={(e) => setStartMin(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={59}
+                      value={startSec}
+                      placeholder="Sec"
+                      className="w-full bg-black border border-zinc-700 p-3 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
+                      onChange={(e) => setStartSec(e.target.value)}
+                    />
                   </div>
                 </div>
                 <div>
                   <label className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-1.5 block">End Time</label>
                   <div className="flex gap-2">
-                    <input type="number" value={endMin} placeholder="Min" className="w-full bg-black border border-zinc-700 p-3 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm" onChange={(e) => setEndMin(e.target.value)} />
-                    <input type="number" value={endSec} placeholder="Sec" className="w-full bg-black border border-zinc-700 p-3 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm" onChange={(e) => setEndSec(e.target.value)} />
+                    <input
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={endHr}
+                      placeholder="Hr"
+                      className="w-full bg-black border border-zinc-700 p-3 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
+                      onChange={(e) => setEndHr(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={59}
+                      value={endMin}
+                      placeholder="Min"
+                      className="w-full bg-black border border-zinc-700 p-3 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
+                      onChange={(e) => setEndMin(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={59}
+                      value={endSec}
+                      placeholder="Sec"
+                      className="w-full bg-black border border-zinc-700 p-3 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
+                      onChange={(e) => setEndSec(e.target.value)}
+                    />
                   </div>
                 </div>
               </div>
