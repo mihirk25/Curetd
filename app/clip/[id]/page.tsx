@@ -3,12 +3,11 @@ import Link from "next/link";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../../firebase";
 import { SharedClipPlayer } from "./shared-clip-player";
-import { RepostButton } from "./repost-button";
 import { ShareActionsRow } from "./share-actions-row";
 
 type Props = {
-  params: Promise<{ id: string }>;
-  searchParams: Promise<{ audio?: string | string[] }>;
+  params: { id: string };
+  searchParams?: { audio?: string | string[] };
 };
 
 type ClipDoc = {
@@ -58,6 +57,18 @@ function getPrimaryMoment(clip: ClipDoc) {
   };
 }
 
+function clipTopicTags(clip: ClipDoc): string[] {
+  const moments = Array.isArray(clip.moments) ? clip.moments : [];
+  const tags = new Set<string>();
+  for (const m of moments) {
+    const t = typeof m?.topic === "string" ? m.topic.trim() : "";
+    if (t) tags.add(t);
+  }
+  const legacy = typeof clip.topic === "string" ? clip.topic.trim() : "";
+  if (legacy) tags.add(legacy);
+  return [...tags];
+}
+
 async function getClip(id: string): Promise<(ClipDoc & { username: string | null }) | null> {
   const snap = await getDoc(doc(db, "clips", id));
   if (!snap.exists()) return null;
@@ -80,11 +91,11 @@ async function getClip(id: string): Promise<(ClipDoc & { username: string | null
 }
 
 function thumbnailUrl(videoId: string | null) {
-  return videoId ? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg` : undefined;
+  return videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : undefined;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { id } = await params;
+  const { id } = params;
   const clip = await getClip(id);
   if (!clip) {
     return {
@@ -95,11 +106,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   const videoId = clip.videoId || extractVideoId(clip.videoUrl || clip.url);
   const title = clip.title || "Curatd clip";
-  const primary = getPrimaryMoment(clip);
-  const description =
-    (typeof primary?.note === "string" && primary.note.trim()) ||
-    clip.note ||
-    "A YouTube moment curated on Curatd.";
+  const tags = clipTopicTags(clip);
+  const handle = clip.username ? `@${clip.username}` : "@unknown";
+  const description = `Curated by ${handle}${tags.length > 0 ? ` · ${tags.join(", ")}` : ""}`;
   const url = `https://curatd.vercel.app/clip/${clip.id}`;
   const image = thumbnailUrl(videoId);
 
@@ -122,10 +131,18 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
+function formatTimestamp(totalSeconds: number) {
+  const s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
+
 export default async function SharedClipPage({ params, searchParams }: Props) {
-  const { id } = await params;
-  const sp = await searchParams;
-  const audioParam = sp?.audio;
+  const { id } = params;
+  const audioParam = searchParams?.audio;
   const audioOnlyFromParam =
     audioParam === "1" ||
     audioParam === "true" ||
@@ -158,6 +175,7 @@ export default async function SharedClipPage({ params, searchParams }: Props) {
   const endRaw = primary?.endTime ?? clip.endTime ?? 0;
   const endSeconds =
     typeof endRaw === "number" && endRaw > startSeconds ? endRaw : undefined;
+  const tags = clipTopicTags(clip);
   const noteText =
     (typeof primary?.note === "string" && primary.note.trim()) ||
     (typeof clip.note === "string" && clip.note.trim()) ||
@@ -212,11 +230,21 @@ export default async function SharedClipPage({ params, searchParams }: Props) {
                 <div className="text-sm text-zinc-500 mt-1 truncate">
                   {clip.channelName || clip.channel || "Unknown channel"}
                 </div>
-                {primary?.topic ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-mono font-semibold bg-emerald-500 text-white px-2.5 py-0.5 rounded-md">
+                    {formatTimestamp(startSeconds)}{endSeconds != null ? ` – ${formatTimestamp(endSeconds)}` : ""}
+                  </span>
+                </div>
+                {tags.length > 0 ? (
                   <div className="flex flex-wrap items-center gap-2 mt-2">
-                    <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                      {primary.topic}
-                    </span>
+                    {tags.slice(0, 12).map((t) => (
+                      <span
+                        key={t}
+                        className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                      >
+                        {t}
+                      </span>
+                    ))}
                   </div>
                 ) : null}
 

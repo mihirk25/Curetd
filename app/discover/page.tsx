@@ -55,6 +55,7 @@ export default function DiscoverPage() {
     (async () => {
       setLoading(true);
       try {
+        const currentUid = user?.uid ?? null;
         // Gather curator userIds from clips (paged).
         const userIds = new Set<string>();
         const topicCountsByUid = new Map<string, Map<string, number>>();
@@ -67,7 +68,7 @@ export default function DiscoverPage() {
           for (const d of snap.docs) {
             const data = d.data() as any;
             const uid = typeof data?.userId === "string" ? data.userId : null;
-            if (uid) userIds.add(uid);
+            if (uid && uid !== currentUid) userIds.add(uid);
 
              if (uid) {
                const moments = Array.isArray(data?.moments) ? (data.moments as any[]) : null;
@@ -91,6 +92,7 @@ export default function DiscoverPage() {
         // Fetch those user docs.
         const rows: CuratorCard[] = [];
         for (const uid of userIds) {
+          if (currentUid && uid === currentUid) continue;
           try {
             const uSnap = await getDoc(doc(db, "users", uid));
             if (!uSnap.exists()) continue;
@@ -130,7 +132,7 @@ export default function DiscoverPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user?.uid]);
 
   const followingSet = useMemo(() => new Set(followingUserIds), [followingUserIds]);
 
@@ -181,6 +183,7 @@ export default function DiscoverPage() {
         ) : (
           <div className="mt-8 grid gap-3">
             {curators.map((c) => {
+              if (user?.uid && c.uid === user.uid) return null;
               const following = followingSet.has(c.uid);
               const busy = Boolean(busyByUid[c.uid]);
               return (
@@ -244,11 +247,13 @@ export default function DiscoverPage() {
                       void toggleFollow(c.uid);
                     }}
                     className={`rounded-full px-4 py-2 text-sm font-semibold border transition-colors ${
-                      following ? "border-emerald-500 bg-emerald-500 text-black" : "border-zinc-400 text-white hover:border-white"
+                      following
+                        ? "border-zinc-600 bg-transparent text-zinc-200 hover:border-zinc-500 hover:text-white"
+                        : "border-emerald-500 bg-emerald-500 text-black hover:bg-emerald-400"
                     } ${busy ? "opacity-60 cursor-not-allowed" : ""}`}
                     aria-label={following ? `Unfollow @${c.username}` : `Follow @${c.username}`}
                   >
-                    {following ? "Unfollow" : "Follow"}
+                    {following ? "Following" : "Follow"}
                   </button>
                 </div>
               );
