@@ -2276,8 +2276,20 @@ export default function CuratdMVP() {
         </div>
       ) : null}
       <header className="shrink-0 border-b border-zinc-800 bg-black px-4 py-3 flex flex-wrap items-center gap-3 md:py-0 md:h-14 md:grid md:grid-cols-[minmax(0,auto)_1fr_minmax(0,auto)] md:items-center md:gap-4">
-        <Link href="/" className="text-sm font-bold tracking-tight text-white hover:text-zinc-200 transition-colors shrink-0 order-1">
-          CURATD
+        <Link
+          href="/"
+          className="shrink-0 order-1 inline-flex items-center hover:opacity-90 transition-opacity"
+        >
+          <span
+            style={{
+              fontFamily: "'Bebas Neue', sans-serif",
+              fontSize: "28px",
+              letterSpacing: "0.18em",
+              color: "#ffffff",
+            }}
+          >
+            CURAT<span style={{ color: "#4ade80" }}>D</span>
+          </span>
         </Link>
         <div className="flex w-full min-w-0 justify-center md:w-auto md:px-2 order-3 md:order-none">
           <CuratorSearchBar />

@@ -29,6 +29,12 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
+      <head>
+        <link
+          href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap"
+          rel="stylesheet"
+        />
+      </head>
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <AuthProvider>{children}</AuthProvider>
       </body>
