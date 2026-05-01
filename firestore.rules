@@ -26,9 +26,10 @@ service cloud.firestore {
         && resource.data.userId == request.auth.uid;
     }
 
-    match /clips/{clipId}/{sub=**} {
+    // Clip subcollections (likes, comments, …). Emoji reactions path removed from UI — block writes under reactions/*.
+    match /clips/{clipId}/{document=**} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if request.auth != null && !document.matches("reactions/.*");
     }
 
     match /savedClips/{id} {

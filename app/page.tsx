@@ -695,6 +695,97 @@ function formatRelativeTime(createdAt: any) {
   }
 }
 
+type CuratorFeedProfile = { username: string | null; photoURL: string | null };
+
+function curatorLetterFallback(handle: string | null, uid: string | null): string {
+  const h = handle?.trim();
+  if (h) return (h[0] || "?").toUpperCase();
+  const u = uid?.trim();
+  if (u) {
+    const ch = u.replace(/[^a-zA-Z0-9]/g, "").slice(0, 1);
+    if (ch) return ch.toUpperCase();
+  }
+  return "?";
+}
+
+function curatorAvatarHue(seed: string): number {
+  let h = 0;
+  const s = seed || "?";
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+
+function FeedClipCuratorAvatar({
+  userId,
+  handle,
+  clipPhotoURL,
+  curatorProfile,
+  onGoProfile,
+}: {
+  userId: string | null;
+  handle: string | null;
+  clipPhotoURL: string | null;
+  curatorProfile: CuratorFeedProfile | undefined;
+  onGoProfile: () => void;
+}) {
+  const [imgBroken, setImgBroken] = useState(false);
+  const profileLoaded = curatorProfile !== undefined;
+  const profilePhoto =
+    curatorProfile?.photoURL && curatorProfile.photoURL.trim()
+      ? curatorProfile.photoURL.trim()
+      : null;
+  const clipPhoto = clipPhotoURL?.trim() || null;
+
+  const resolvedUrl = profileLoaded ? profilePhoto : clipPhoto || profilePhoto;
+
+  useEffect(() => {
+    setImgBroken(false);
+  }, [resolvedUrl]);
+
+  const letter = curatorLetterFallback(handle, userId);
+  const hue = curatorAvatarHue(handle || userId || "");
+  const showPhoto = Boolean(resolvedUrl && !imgBroken);
+  const canNavigate = Boolean(handle);
+
+  const inner = showPhoto ? (
+    <img
+      src={resolvedUrl!}
+      alt=""
+      className="h-full w-full object-cover"
+      onError={() => setImgBroken(true)}
+    />
+  ) : (
+    <div
+      className="flex h-full w-full items-center justify-center text-[11px] font-bold text-white shadow-inner"
+      style={{ backgroundColor: `hsl(${hue} 48% 38%)` }}
+    >
+      {letter}
+    </div>
+  );
+
+  const shellClass =
+    "mt-3 inline-flex h-8 w-8 shrink-0 rounded-full overflow-hidden border border-zinc-700";
+
+  if (!canNavigate) {
+    return (
+      <span className={`${shellClass} cursor-default`} title="Curator">
+        {inner}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onGoProfile}
+      className={`${shellClass} cursor-pointer`}
+      title={`@${handle}`}
+    >
+      {inner}
+    </button>
+  );
+}
+
 export default function CuratdMVP() {
   const { user, signIn, signOut: handleSignOut } = useAuth();
   const router = useRouter();
@@ -734,7 +825,7 @@ export default function CuratdMVP() {
   const [playingMoment, setPlayingMoment] = useState<{ clipId: string; momentId: string } | null>(null);
   const [topicSearch, setTopicSearch] = useState("");
   const [curatorSearch, setCuratorSearch] = useState("");
-  const [usernamesByUid, setUsernamesByUid] = useState<Record<string, string>>({});
+  const [curatorByUid, setCuratorByUid] = useState<Record<string, CuratorFeedProfile>>({});
   const [activeFeedTab, setActiveFeedTab] = useState<"explore" | "following">("explore");
   const [followingUserIds, setFollowingUserIds] = useState<string[]>([]);
   const [followingClips, setFollowingClips] = useState<any[]>([]);
@@ -743,6 +834,8 @@ export default function CuratdMVP() {
   >([]);
   const [openShareMenuClipId, setOpenShareMenuClipId] = useState<string | null>(null);
   const shareMenuRef = useRef<HTMLDivElement | null>(null);
+  const [openClipOwnerMenuClipId, setOpenClipOwnerMenuClipId] = useState<string | null>(null);
+  const clipOwnerMenuRef = useRef<HTMLDivElement | null>(null);
   const [toastMessage, setToastMessage] = useState("");
   const [navMenuOpen, setNavMenuOpen] = useState(false);
   const [editUsernameOpen, setEditUsernameOpen] = useState(false);
@@ -764,9 +857,6 @@ export default function CuratdMVP() {
   const [inlineSubmitting, setInlineSubmitting] = useState(false);
   const [likesByClipId, setLikesByClipId] = useState<Record<string, { count: number; liked: boolean }>>({});
   const [repostsByClipId, setRepostsByClipId] = useState<Record<string, { count: number; reposted: boolean }>>({});
-  const [reactionsByClipId, setReactionsByClipId] = useState<
-    Record<string, { counts: Record<string, number>; mine: string | null }>
-  >({});
   const [commentCountsByClipId, setCommentCountsByClipId] = useState<Record<string, number>>({});
   const [openCommentsByClipId, setOpenCommentsByClipId] = useState<Record<string, boolean>>({});
   const [commentsByClipId, setCommentsByClipId] = useState<Record<string, any[]>>({});
@@ -1055,9 +1145,7 @@ export default function CuratdMVP() {
       for (const c of clips) {
         const uid = c?.userId;
         if (typeof uid !== "string" || !uid) continue;
-        const hasClipUsername = typeof c?.username === "string" && c.username.trim();
-        if (hasClipUsername) continue;
-        if (usernamesByUid[uid]) continue;
+        if (curatorByUid[uid] !== undefined) continue;
         missing.add(uid);
       }
       if (missing.size === 0) return;
@@ -1067,30 +1155,34 @@ export default function CuratdMVP() {
           try {
             const snap = await getDoc(doc(db, "users", uid));
             const data = snap.exists() ? (snap.data() as any) : null;
-            const u = typeof data?.username === "string" ? data.username.trim().toLowerCase() : "";
-            if (!u) return null;
-            return [uid, u] as const;
+            const usernameVal =
+              typeof data?.username === "string" ? data.username.trim().toLowerCase() : null;
+            const photoURLVal =
+              typeof data?.photoURL === "string" && data.photoURL.trim()
+                ? data.photoURL.trim()
+                : null;
+            return [uid, { username: usernameVal, photoURL: photoURLVal } satisfies CuratorFeedProfile] as const;
           } catch {
-            return null;
+            return [uid, { username: null, photoURL: null } satisfies CuratorFeedProfile] as const;
           }
         }),
       );
 
       if (cancelled) return;
-      const next: Record<string, string> = {};
-      for (const e of entries) {
-        if (!e) continue;
-        next[e[0]] = e[1];
-      }
-      if (Object.keys(next).length === 0) return;
-      setUsernamesByUid((prev) => ({ ...prev, ...next }));
+      setCuratorByUid((prev) => {
+        const next = { ...prev };
+        for (const e of entries) {
+          next[e[0]] = e[1];
+        }
+        return next;
+      });
     }
 
     void run();
     return () => {
       cancelled = true;
     };
-  }, [clips, usernamesByUid]);
+  }, [clips, curatorByUid]);
 
   useEffect(() => {
     setPlayingMoment(null);
@@ -1142,24 +1234,6 @@ export default function CuratdMVP() {
         try {
           await updateDoc(doc(db, "clips", clipId), { repostCount: increment(1) });
         } catch {}
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const setReaction = async (clipId: string, type: "🔥" | "🧠" | "💎") => {
-    if (!user) {
-      setShowAuthModal(true);
-      return;
-    }
-    const refReaction = doc(db, "clips", clipId, "reactions", user.uid);
-    const mine = reactionsByClipId[clipId]?.mine;
-    try {
-      if (mine === type) {
-        await deleteDoc(refReaction);
-      } else {
-        await setDoc(refReaction, { type, reactedAt: serverTimestamp() });
       }
     } catch (e) {
       console.error(e);
@@ -1274,6 +1348,16 @@ export default function CuratdMVP() {
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [openShareMenuClipId]);
+
+  useEffect(() => {
+    if (!openClipOwnerMenuClipId) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const el = clipOwnerMenuRef.current;
+      if (el && !el.contains(e.target as Node)) setOpenClipOwnerMenuClipId(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [openClipOwnerMenuClipId]);
 
   const uploadNavPhoto = async (file: File) => {
     const allowed = ["image/jpeg", "image/png", "image/webp"];
@@ -1702,10 +1786,10 @@ export default function CuratdMVP() {
       if (!curatorQ) return true;
       const uid = String(c?.userId || "").toLowerCase();
       const u1 = typeof c?.username === "string" ? c.username.trim().toLowerCase() : "";
+      const curatorProf =
+        typeof c?.userId === "string" ? curatorByUid[String(c.userId)] : undefined;
       const u2 =
-        typeof c?.userId === "string" && usernamesByUid[String(c.userId)]
-          ? String(usernamesByUid[String(c.userId)]).trim().toLowerCase()
-          : "";
+        curatorProf?.username ? String(curatorProf.username).trim().toLowerCase() : "";
       return curatorQ === uid || curatorQ === u1 || curatorQ === u2;
     };
 
@@ -1719,7 +1803,7 @@ export default function CuratdMVP() {
       const topicOk = !q || topics.some((t) => t.toLowerCase().includes(q));
       return topicOk && matchesCurator(c);
     });
-  }, [clips, followingClips, activeFeedTab, showSaved, savedClips, topicSearch, curatorSearch, usernamesByUid, selectedTopics, visitorSelectedCurators, user?.uid, followingUserIds]);
+  }, [clips, followingClips, activeFeedTab, showSaved, savedClips, topicSearch, curatorSearch, curatorByUid, selectedTopics, visitorSelectedCurators, user?.uid, followingUserIds]);
 
   useEffect(() => {
     // Keep subscriptions bounded to currently visible clips.
@@ -1740,30 +1824,6 @@ export default function CuratdMVP() {
           },
           () => {
             setLikesByClipId((prev) => ({ ...prev, [clipId]: { count: 0, liked: false } }));
-          },
-        ),
-      );
-
-      const reactionsRef = collection(db, "clips", clipId, "reactions");
-      unsubs.push(
-        onSnapshot(
-          reactionsRef,
-          (snap) => {
-            const counts: Record<string, number> = { "🔥": 0, "🧠": 0, "💎": 0 };
-            let mine: string | null = null;
-            for (const d of snap.docs) {
-              const data = d.data() as any;
-              const t = typeof data?.type === "string" ? data.type : null;
-              if (t && counts[t] != null) counts[t] += 1;
-              if (user?.uid && d.id === user.uid) mine = t;
-            }
-            setReactionsByClipId((prev) => ({ ...prev, [clipId]: { counts, mine } }));
-          },
-          () => {
-            setReactionsByClipId((prev) => ({
-              ...prev,
-              [clipId]: { counts: { "🔥": 0, "🧠": 0, "💎": 0 }, mine: null },
-            }));
           },
         ),
       );
@@ -2258,6 +2318,21 @@ export default function CuratdMVP() {
                   </span>
                 ) : null}
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (user == null) {
+                    pendingAddClipAfterAuth.current = true;
+                    setShowAuthModal(true);
+                    return;
+                  }
+                  void openNewClipForm();
+                }}
+                className="shrink-0 rounded-xl bg-emerald-500 px-3.5 py-2 text-sm font-semibold text-black hover:bg-emerald-400 transition-colors"
+                aria-label="Add clip"
+              >
+                + Add Clip
+              </button>
               <input
                 ref={navPhotoInputRef}
                 type="file"
@@ -2358,6 +2433,17 @@ export default function CuratdMVP() {
               </button>
               <button
                 type="button"
+                onClick={() => {
+                  pendingAddClipAfterAuth.current = true;
+                  setShowAuthModal(true);
+                }}
+                className="shrink-0 rounded-xl bg-emerald-500 px-3.5 py-2 text-sm font-semibold text-black hover:bg-emerald-400 transition-colors"
+                aria-label="Add clip"
+              >
+                + Add Clip
+              </button>
+              <button
+                type="button"
                 onClick={() => void signIn()}
                 className="text-sm font-semibold px-4 py-2 rounded-xl bg-white text-black hover:bg-zinc-200 transition-colors"
               >
@@ -2384,25 +2470,6 @@ export default function CuratdMVP() {
             <span className="text-black text-[10px] leading-none">▶</span>
           </div>
         </button>
-
-        <div className="flex-1 flex flex-col items-center gap-2 pt-2">
-          <button
-            type="button"
-            onClick={() => {
-              if (user == null) {
-                pendingAddClipAfterAuth.current = true;
-                setShowAuthModal(true);
-                return;
-              }
-              void openNewClipForm();
-            }}
-            className="w-10 h-10 rounded-xl flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-900/60 transition-colors"
-            aria-label="Add clip"
-            title="Add clip"
-          >
-            <span className="text-lg leading-none">＋</span>
-          </button>
-        </div>
       </aside>
 
       {/* Middle sidebar */}
@@ -2631,7 +2698,7 @@ export default function CuratdMVP() {
               <div className="text-center py-20">
                 <div className="text-5xl mb-4 opacity-20">▶</div>
                 <p className="text-zinc-500 text-lg font-medium">No clips yet</p>
-                <p className="text-zinc-600 text-sm mt-1">Hit the + Add icon to start curating</p>
+                <p className="text-zinc-600 text-sm mt-1">Use + Add Clip in the header to start curating</p>
               </div>
             ) : filtered.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -2684,6 +2751,54 @@ export default function CuratdMVP() {
                         : 'border-zinc-800/70 hover:border-zinc-700'
                     }`}
                   >
+                    {user?.uid && clip.userId && user.uid === clip.userId ? (
+                      <div
+                        className="absolute top-2 right-2 z-[100]"
+                        ref={
+                          openClipOwnerMenuClipId === String(clip.id) ? clipOwnerMenuRef : undefined
+                        }
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOpenShareMenuClipId(null);
+                            setOpenClipOwnerMenuClipId((id) =>
+                              id === String(clip.id) ? null : String(clip.id),
+                            );
+                          }}
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-600/90 bg-zinc-950/85 text-zinc-300 shadow-lg backdrop-blur-md hover:border-zinc-500 hover:bg-zinc-900 hover:text-white transition-colors"
+                          aria-label="Clip options"
+                          aria-haspopup="menu"
+                          aria-expanded={openClipOwnerMenuClipId === String(clip.id)}
+                          title="More options"
+                        >
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                            <circle cx="5" cy="12" r="2" />
+                            <circle cx="12" cy="12" r="2" />
+                            <circle cx="19" cy="12" r="2" />
+                          </svg>
+                        </button>
+                        {openClipOwnerMenuClipId === String(clip.id) ? (
+                          <div
+                            className="absolute right-0 top-full z-[101] mt-1 min-w-[148px] rounded-xl border border-zinc-700 bg-zinc-950 py-1 shadow-xl ring-1 ring-black/50"
+                            role="menu"
+                          >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              className="block w-full px-3 py-2 text-left text-xs font-medium text-red-300 hover:bg-zinc-800/90 hover:text-red-200"
+                              onClick={() => {
+                                setOpenClipOwnerMenuClipId(null);
+                                void handleDelete(clip.id);
+                              }}
+                            >
+                              Delete clip
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+
                     {/* Video / Thumbnail (stacked, full width) */}
                     {isAudioOnly ? (
                       <div className="relative aspect-video w-full border-b border-zinc-800 rounded-t-2xl overflow-hidden bg-zinc-950">
@@ -2781,7 +2896,7 @@ export default function CuratdMVP() {
                                   : null;
                               const handleFromLookup =
                                 !handleFromClip && typeof clip.userId === "string"
-                                  ? usernamesByUid[clip.userId] ?? null
+                                  ? curatorByUid[clip.userId]?.username ?? null
                                   : null;
                               const handle = handleFromClip || handleFromLookup;
                               if (handle) {
@@ -2827,37 +2942,29 @@ export default function CuratdMVP() {
                               </span>
                             ) : null}
                           </div>
-                          {(() => {
-                            const handle =
+                          <FeedClipCuratorAvatar
+                            userId={typeof clip.userId === "string" ? clip.userId : null}
+                            handle={
                               typeof clip.username === "string" && clip.username.trim()
                                 ? clip.username.trim().toLowerCase()
                                 : typeof clip.userId === "string"
-                                  ? usernamesByUid[clip.userId] ?? null
-                                  : null;
-                            if (!handle) return null;
-                            if (clip.photoURL) {
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => goToCuratorProfile(handle)}
-                                  className="mt-3 inline-flex h-8 w-8 rounded-full overflow-hidden border border-zinc-700"
-                                  title={`@${handle}`}
-                                >
-                                  <img src={clip.photoURL} alt="" className="h-full w-full object-cover" />
-                                </button>
-                              );
+                                  ? curatorByUid[clip.userId]?.username ?? null
+                                  : null
                             }
-                            return (
-                              <button
-                                type="button"
-                                onClick={() => goToCuratorProfile(handle)}
-                                className="mt-3 inline-flex h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-xs font-bold text-zinc-200"
-                                title={`@${handle}`}
-                              >
-                                {handle.slice(0, 1).toUpperCase()}
-                              </button>
-                            );
-                          })()}
+                            clipPhotoURL={typeof clip.photoURL === "string" ? clip.photoURL : null}
+                            curatorProfile={
+                              typeof clip.userId === "string" ? curatorByUid[clip.userId] : undefined
+                            }
+                            onGoProfile={() => {
+                              const h =
+                                typeof clip.username === "string" && clip.username.trim()
+                                  ? clip.username.trim().toLowerCase()
+                                  : typeof clip.userId === "string"
+                                    ? curatorByUid[clip.userId]?.username ?? null
+                                    : null;
+                              if (h) goToCuratorProfile(h);
+                            }}
+                          />
                           {!isAudioOnly && primaryMoment?.note ? (
                             <div className="text-base text-zinc-100 font-medium italic border-l-2 border-emerald-500 pl-3 mt-2 line-clamp-3">
                               &ldquo;{primaryMoment.note}&rdquo;
@@ -2868,7 +2975,7 @@ export default function CuratdMVP() {
                             <div className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-purple-300/80">Audio only</div>
                           ) : null}
 
-                          {/* Likes + reactions */}
+                          {/* Like, repost, comment */}
                           <div className="mt-4 flex flex-wrap items-center gap-3">
                             <button
                               type="button"
@@ -2881,8 +2988,13 @@ export default function CuratdMVP() {
                               aria-label="Like"
                               title="Like"
                             >
-                              <span aria-hidden>
-                                {likesByClipId[String(clip.id)]?.liked ? "♥" : "♡"}
+                              <span
+                                aria-hidden
+                                className={
+                                  likesByClipId[String(clip.id)]?.liked ? "" : "opacity-55 saturate-50"
+                                }
+                              >
+                                ❤️
                               </span>
                               <span>{likesByClipId[String(clip.id)]?.count ?? 0}</span>
                             </button>
@@ -2902,30 +3014,6 @@ export default function CuratdMVP() {
                               <span>Repost</span>
                               <span>{repostsByClipId[String(clip.id)]?.count ?? 0}</span>
                             </button>
-
-                            {(["🔥", "🧠", "💎"] as const).map((r) => {
-                              const data = reactionsByClipId[String(clip.id)];
-                              const mine = data?.mine ?? null;
-                              const count = data?.counts?.[r] ?? 0;
-                              const active = mine === r;
-                              return (
-                                <button
-                                  key={r}
-                                  type="button"
-                                  onClick={() => void setReaction(String(clip.id), r)}
-                                  className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-full border transition-colors ${
-                                    active
-                                      ? "border-white/30 bg-white text-black"
-                                      : "border-zinc-800 bg-black/20 text-zinc-400 hover:text-white hover:bg-zinc-900/40"
-                                  }`}
-                                  aria-label={`React ${r}`}
-                                  title="React"
-                                >
-                                  <span aria-hidden>{r}</span>
-                                  <span>{count}</span>
-                                </button>
-                              );
-                            })}
 
                             <button
                               type="button"
@@ -3055,9 +3143,12 @@ export default function CuratdMVP() {
                           >
                             <button
                               type="button"
-                              onClick={() =>
-                                setOpenShareMenuClipId((id) => (id === String(clip.id) ? null : String(clip.id)))
-                              }
+                              onClick={() => {
+                                setOpenClipOwnerMenuClipId(null);
+                                setOpenShareMenuClipId((id) =>
+                                  id === String(clip.id) ? null : String(clip.id),
+                                );
+                              }}
                               className="text-[11px] text-zinc-400 hover:text-white px-2.5 py-1 rounded-md hover:bg-zinc-800 transition-colors"
                               aria-label="Share options"
                               aria-expanded={openShareMenuClipId === String(clip.id)}
@@ -3122,16 +3213,6 @@ export default function CuratdMVP() {
                               </div>
                             ) : null}
                           </div>
-
-                          {user && clip.userId && user.uid === clip.userId ? (
-                            <button
-                              type="button"
-                              onClick={() => void handleDelete(clip.id)}
-                              className="text-[11px] text-zinc-400 hover:text-red-300 px-2.5 py-1 rounded-md hover:bg-zinc-800 transition-colors"
-                            >
-                              Delete video
-                            </button>
-                          ) : null}
                         </div>
                       </div>
 
