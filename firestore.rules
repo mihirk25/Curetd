@@ -1,27 +1,51 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function conversationDoc(conversationId) {
+      return /databases/$(database)/documents/conversations/$(conversationId);
+    }
+
+    function hasValidParticipants(data) {
+      return data.participants is list
+        && data.participants.size() == 2
+        && request.auth.uid in data.participants;
+    }
+
+    function isConversationParticipant(conversationId) {
+      return signedIn()
+        && request.auth.uid in get(conversationDoc(conversationId)).data.participants;
+    }
+
+    function isConversationParticipantAfter(conversationId) {
+      return signedIn()
+        && request.auth.uid in getAfter(conversationDoc(conversationId)).data.participants;
+    }
+
     // Unique handles: public read; create/delete when the authenticated user matches { uid }.
     match /usernames/{uname} {
       allow read: if true;
-      allow create: if request.auth != null
+      allow create: if signedIn()
         && request.resource.data.keys().hasOnly(['uid'])
         && request.auth.uid == request.resource.data.uid;
       allow update: if false;
-      allow delete: if request.auth != null
+      allow delete: if signedIn()
         && request.auth.uid == resource.data.uid;
     }
 
     match /users/{userId} {
       allow read: if true;
-      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if signedIn() && request.auth.uid == userId;
       allow delete: if false;
     }
 
     match /clips/{clipId} {
       allow read: if true;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null
+      allow create: if signedIn();
+      allow update, delete: if signedIn()
         && resource != null
         && resource.data.userId == request.auth.uid;
     }
@@ -29,23 +53,51 @@ service cloud.firestore {
     // Clip subcollections (likes, comments, …). Emoji reactions path removed from UI — block writes under reactions/*.
     match /clips/{clipId}/{document=**} {
       allow read: if true;
-      allow write: if request.auth != null && !document.matches("reactions/.*");
+      allow write: if signedIn() && !document.matches("reactions/.*");
     }
 
     match /savedClips/{id} {
-      allow read, write: if request.auth != null;
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly(['userId', 'clipId', 'savedAt'])
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.clipId is string;
+      allow delete: if signedIn() && resource.data.userId == request.auth.uid;
     }
 
     match /follows/{id} {
-      allow read, write: if request.auth != null;
+      allow read: if true;
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly(['followerId', 'followingId', 'createdAt'])
+        && request.resource.data.followerId == request.auth.uid
+        && request.resource.data.followingId is string
+        && request.resource.data.followingId != request.auth.uid;
+      allow delete: if signedIn() && resource.data.followerId == request.auth.uid;
     }
 
     match /conversations/{id} {
-      allow read, write: if request.auth != null;
+      allow read: if signedIn() && request.auth.uid in resource.data.participants;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['participants', 'lastMessage', 'lastMessageAt', 'unreadBy'])
+        && hasValidParticipants(request.resource.data);
+      allow update: if signedIn()
+        && request.auth.uid in resource.data.participants
+        && request.resource.data.keys().hasOnly(['participants', 'lastMessage', 'lastMessageAt', 'unreadBy'])
+        && request.resource.data.participants == resource.data.participants;
+      allow delete: if false;
     }
 
     match /conversations/{id}/messages/{mid} {
-      allow read, write: if request.auth != null;
+      allow read: if isConversationParticipant(id);
+      allow create: if isConversationParticipantAfter(id)
+        && request.resource.data.keys().hasOnly(['senderId', 'text', 'createdAt', 'read'])
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.read == false;
+      allow update: if isConversationParticipant(id)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read == true;
+      allow delete: if false;
     }
   }
 }
