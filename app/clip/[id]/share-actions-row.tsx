@@ -11,7 +11,10 @@ export function ShareActionsRow({
   originalCuratorId: string;
 }) {
   const [copied, setCopied] = useState(false);
-  const url = useMemo(() => `https://curatd.vercel.app/clip/${clipId}`, [clipId]);
+  const url = useMemo(() => {
+    if (typeof window === "undefined") return `https://curatd.vercel.app/clip/${clipId}`;
+    return `${window.location.origin}/clip/${clipId}`;
+  }, [clipId]);
 
   const copy = async () => {
     try {

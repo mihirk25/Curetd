@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../../firebase";
 import { SharedClipPlayer } from "./shared-clip-player";
@@ -86,7 +87,11 @@ export async function generateMetadata({ params }) {
   const tags = clipTopicTags(clip);
   const handle = clip.username ? `@${clip.username}` : "@unknown";
   const description = `Curated by ${handle}${tags.length > 0 ? ` · ${tags.join(", ")}` : ""}`;
-  const url = `https://curatd.vercel.app/clip/${clip.id}`;
+  const h = headers();
+  const host = h.get("x-forwarded-host") || h.get("host");
+  const proto = h.get("x-forwarded-proto") || "https";
+  const origin = host ? `${proto}://${host}` : "https://curatd.vercel.app";
+  const url = `${origin}/clip/${clip.id}`;
   const image = thumbnailUrl(videoId);
 
   return {

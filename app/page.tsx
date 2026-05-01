@@ -3189,7 +3189,7 @@ export default function CuratdMVP() {
                                   className="block w-full px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800"
                                   onClick={() => {
                                     void copyTextToClipboard(
-                                      `https://curatd.vercel.app/clip/${clip.id}`,
+                                      `${window.location.origin}/clip/${clip.id}`,
                                     );
                                     setOpenShareMenuClipId(null);
                                   }}
@@ -3215,7 +3215,7 @@ export default function CuratdMVP() {
                                   className="block w-full px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-800"
                                   onClick={() => {
                                     void copyTextToClipboard(
-                                      `https://curatd.vercel.app/clip/${clip.id}?audio=1`,
+                                      `${window.location.origin}/clip/${clip.id}?audio=1`,
                                     );
                                     setOpenShareMenuClipId(null);
                                   }}
