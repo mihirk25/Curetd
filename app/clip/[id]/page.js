@@ -7,6 +7,12 @@ import { ShareActionsRow } from "./share-actions-row";
 
 export const runtime = "nodejs";
 
+/** App Router: this project uses `app/` (no `pages/` clip route). Firestore via client SDK from `firebase.ts`. */
+
+async function unwrapSegmentProps(params) {
+  return params != null && typeof params.then === "function" ? await params : params;
+}
+
 function extractVideoId(url) {
   if (!url) return null;
   const patterns = [
@@ -75,7 +81,11 @@ function thumbnailUrl(videoId) {
 }
 
 export async function generateMetadata({ params }) {
-  const { id } = params;
+  const resolved = await unwrapSegmentProps(params);
+  const id = resolved?.id;
+  if (typeof id !== "string" || !id) {
+    return { title: "Clip | Curatd", description: "Curated clips on Curatd." };
+  }
   const clip = await getClip(id);
   if (!clip) {
     return {
@@ -119,8 +129,31 @@ function formatTimestamp(totalSeconds) {
 }
 
 export default async function SharedClipPage({ params, searchParams }) {
-  const { id } = params;
-  const audioParam = searchParams == null ? undefined : searchParams.audio;
+  const resolvedParams = await unwrapSegmentProps(params);
+  const id = resolvedParams?.id;
+  const resolvedSearch =
+    searchParams != null && typeof searchParams.then === "function"
+      ? await searchParams
+      : searchParams;
+
+  if (typeof id !== "string" || !id) {
+    return (
+      <main className="min-h-screen bg-black px-6 py-16 font-sans text-white">
+        <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/30 p-8 text-center">
+          <h1 className="text-xl font-bold">Invalid link</h1>
+          <p className="mt-2 text-sm text-zinc-500">Missing clip id.</p>
+          <Link
+            href="/"
+            className="mt-6 inline-block text-sm font-semibold text-emerald-500 hover:text-emerald-400"
+          >
+            Back to feed
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  const audioParam = resolvedSearch == null ? undefined : resolvedSearch.audio;
   const audioOnlyFromParam =
     audioParam === "1" ||
     audioParam === "true" ||
