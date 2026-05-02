@@ -5,6 +5,8 @@ import { db } from "../../../firebase";
 import { SharedClipPlayer } from "./shared-clip-player";
 import { ShareActionsRow } from "./share-actions-row";
 
+export const runtime = "nodejs";
+
 function extractVideoId(url) {
   if (!url) return null;
   const patterns = [
