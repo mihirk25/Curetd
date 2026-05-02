@@ -4,7 +4,7 @@
  * Client-rendered clip page: Firestore reads run in the browser with the Firebase client SDK
  * so public `clips` reads succeed under security rules (no unauthenticated SSR).
  */
-import React, { Suspense, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Head from "next/head";
 import { useParams, useSearchParams } from "next/navigation";
@@ -93,6 +93,7 @@ function ClipPageInner() {
   const params = useParams();
   const searchParams = useSearchParams();
   const id = typeof params?.id === "string" ? params.id : null;
+  const clipPlayerRef = useRef(null);
 
   const audioParam = searchParams?.get("audio");
   const audioOnlyFromParam =
@@ -309,6 +310,7 @@ function ClipPageInner() {
             <div className="border-b border-zinc-800 rounded-t-2xl overflow-hidden">
               {videoId ? (
                 <SharedClipPlayer
+                  ref={clipPlayerRef}
                   videoId={videoId}
                   startTime={startSeconds}
                   endTime={endSeconds}
@@ -335,10 +337,18 @@ function ClipPageInner() {
                   </div>
 
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="text-[11px] font-mono font-semibold bg-emerald-500 text-white px-2.5 py-0.5 rounded-md">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clipPlayerRef.current?.seekToAndPlay?.(startSeconds);
+                      }}
+                      className="text-[11px] font-mono font-semibold bg-emerald-500 text-white px-2.5 py-0.5 rounded-md hover:bg-emerald-400 transition-colors cursor-pointer"
+                      title="Jump to clip start and play"
+                      aria-label="Jump to clip start and play"
+                    >
                       {formatTimestamp(startSeconds)}
                       {endSeconds != null ? ` – ${formatTimestamp(endSeconds)}` : ""}
-                    </span>
+                    </button>
                   </div>
 
                   {tags.length > 0 ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 declare global {
   interface Window {
@@ -28,17 +28,20 @@ function loadYouTubeIframeAPI(): Promise<any> {
   });
 }
 
-export function SharedClipPlayer({
-  videoId,
-  startTime,
-  endTime,
-  audioOnly = false,
-}: {
-  videoId: string;
-  startTime: number;
-  endTime?: number;
-  audioOnly?: boolean;
-}) {
+export type SharedClipPlayerHandle = {
+  /** Seek to seconds and start playback (YouTube IFrame API). */
+  seekToAndPlay: (seconds: number) => void;
+};
+
+export const SharedClipPlayer = forwardRef<
+  SharedClipPlayerHandle,
+  {
+    videoId: string;
+    startTime: number;
+    endTime?: number;
+    audioOnly?: boolean;
+  }
+>(function SharedClipPlayer({ videoId, startTime, endTime, audioOnly = false }, ref) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const mountRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<any>(null);
@@ -48,6 +51,22 @@ export function SharedClipPlayer({
   const [playbackQuality, setPlaybackQuality] = useState<
     "auto" | "144p" | "240p" | "360p" | "480p" | "720p" | "1080p"
   >("auto");
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      seekToAndPlay(atSeconds: number) {
+        const p = playerRef.current;
+        if (!p) return;
+        const t = Math.max(0, Math.floor(Number(atSeconds) || 0));
+        try {
+          p.seekTo?.(t, true);
+          p.playVideo?.();
+        } catch {}
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -397,4 +416,6 @@ export function SharedClipPlayer({
       ) : null}
     </div>
   );
-}
+});
+
+SharedClipPlayer.displayName = "SharedClipPlayer";
