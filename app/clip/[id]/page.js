@@ -1,17 +1,17 @@
+"use client";
+
+/**
+ * Client-rendered clip page: Firestore reads run in the browser with the Firebase client SDK
+ * so public `clips` reads succeed under security rules (no unauthenticated SSR).
+ */
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { headers } from "next/headers";
+import Head from "next/head";
+import { useParams, useSearchParams } from "next/navigation";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../../firebase";
 import { SharedClipPlayer } from "./shared-clip-player";
 import { ShareActionsRow } from "./share-actions-row";
-
-export const runtime = "nodejs";
-
-/** App Router: this project uses `app/` (no `pages/` clip route). Firestore via client SDK from `firebase.ts`. */
-
-async function unwrapSegmentProps(params) {
-  return params != null && typeof params.then === "function" ? await params : params;
-}
 
 function extractVideoId(url) {
   if (!url) return null;
@@ -55,7 +55,11 @@ function clipTopicTags(clip) {
   return [...tags];
 }
 
-async function getClip(id) {
+function thumbnailUrl(videoId) {
+  return videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : undefined;
+}
+
+async function fetchClipWithCurator(id) {
   const snap = await getDoc(doc(db, "clips", id));
   if (!snap.exists()) return null;
 
@@ -76,49 +80,6 @@ async function getClip(id) {
   return { ...clip, username };
 }
 
-function thumbnailUrl(videoId) {
-  return videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : undefined;
-}
-
-export async function generateMetadata({ params }) {
-  const resolved = await unwrapSegmentProps(params);
-  const id = resolved?.id;
-  if (typeof id !== "string" || !id) {
-    return { title: "Clip | Curatd", description: "Curated clips on Curatd." };
-  }
-  const clip = await getClip(id);
-  if (!clip) {
-    return {
-      title: "Clip not found | Curatd",
-      description: "This Curatd clip could not be found.",
-    };
-  }
-
-  const videoId = clip.videoId || extractVideoId(clip.videoUrl || clip.url);
-  const title = clip.title || "Curatd clip";
-  const tags = clipTopicTags(clip);
-  const handle = clip.username ? `@${clip.username}` : "@unknown";
-  const description = `Curated by ${handle}${tags.length > 0 ? ` · ${tags.join(", ")}` : ""}`;
-  const h = headers();
-  const host = h.get("x-forwarded-host") || h.get("host");
-  const proto = h.get("x-forwarded-proto") || "https";
-  const origin = host ? `${proto}://${host}` : "https://curatd.vercel.app";
-  const url = `${origin}/clip/${clip.id}`;
-  const image = thumbnailUrl(videoId);
-
-  return {
-    title,
-    description,
-    openGraph: {
-      title,
-      description,
-      url,
-      type: "article",
-      images: image ? [{ url: image }] : undefined,
-    },
-  };
-}
-
 function formatTimestamp(totalSeconds) {
   const s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
   const h = Math.floor(s / 3600);
@@ -128,17 +89,98 @@ function formatTimestamp(totalSeconds) {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
-export default async function SharedClipPage({ params, searchParams }) {
-  const resolvedParams = await unwrapSegmentProps(params);
-  const id = resolvedParams?.id;
-  const resolvedSearch =
-    searchParams != null && typeof searchParams.then === "function"
-      ? await searchParams
-      : searchParams;
+function ClipPageInner() {
+  const params = useParams();
+  const searchParams = useSearchParams();
+  const id = typeof params?.id === "string" ? params.id : null;
 
-  if (typeof id !== "string" || !id) {
+  const audioParam = searchParams?.get("audio");
+  const audioOnlyFromParam =
+    audioParam === "1" ||
+    audioParam === "true" ||
+    (Array.isArray(audioParam) && audioParam.some((v) => v === "1" || v === "true"));
+
+  const [clip, setClip] = useState(null);
+  const [status, setStatus] = useState("loading"); // loading | ready | not_found | error | forbidden | invalid
+
+  useEffect(() => {
+    if (!id) {
+      setClip(null);
+      setStatus("invalid");
+      return;
+    }
+
+    let cancelled = false;
+    setStatus("loading");
+    setClip(null);
+
+    (async () => {
+      try {
+        const data = await fetchClipWithCurator(id);
+        if (cancelled) return;
+        if (!data) {
+          setClip(null);
+          setStatus("not_found");
+          return;
+        }
+        setClip(data);
+        setStatus("ready");
+      } catch (e) {
+        if (cancelled) return;
+        const code = e && typeof e === "object" && "code" in e ? String(e.code) : "";
+        if (code === "permission-denied") {
+          setClip(null);
+          setStatus("forbidden");
+        } else {
+          setClip(null);
+          setStatus("error");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  const og = useMemo(() => {
+    if (!clip || status !== "ready") return null;
+    const videoId = clip.videoId || extractVideoId(clip.videoUrl || clip.url);
+    const title = clip.title || "Curatd clip";
+    const tags = clipTopicTags(clip);
+    const handle = clip.username ? `@${clip.username}` : "@unknown";
+    const description = `Curated by ${handle}${tags.length > 0 ? ` · ${tags.join(", ")}` : ""}`;
+    const origin =
+      typeof window !== "undefined" && window.location?.origin
+        ? window.location.origin
+        : "";
+    const url = origin ? `${origin}/clip/${clip.id}` : "";
+    const image = thumbnailUrl(videoId);
+    return { title, description, url, image };
+  }, [clip, status]);
+
+  const audioOnly = audioOnlyFromParam || clip?.audioOnly === true;
+  const primary = clip ? getPrimaryMoment(clip) : null;
+  const startSeconds = clip
+    ? Math.max(0, Number(primary?.startTime ?? clip.startTime ?? 0) || 0)
+    : 0;
+  const endRaw = primary?.endTime ?? clip?.endTime ?? 0;
+  const endSeconds =
+    clip && typeof endRaw === "number" && endRaw > startSeconds ? endRaw : undefined;
+  const tags = clip ? clipTopicTags(clip) : [];
+  const videoId = clip ? clip.videoId || extractVideoId(clip.videoUrl || clip.url) : null;
+
+  const youtubeWatchUrl =
+    videoId != null && videoId !== ""
+      ? `https://www.youtube.com/watch?v=${videoId}&t=${Math.floor(startSeconds)}s`
+      : null;
+
+  if (!id || status === "invalid") {
     return (
       <main className="min-h-screen bg-black px-6 py-16 font-sans text-white">
+        <Head>
+          <title>Invalid link | Curatd</title>
+        </Head>
         <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/30 p-8 text-center">
           <h1 className="text-xl font-bold">Invalid link</h1>
           <p className="mt-2 text-sm text-zinc-500">Missing clip id.</p>
@@ -153,17 +195,67 @@ export default async function SharedClipPage({ params, searchParams }) {
     );
   }
 
-  const audioParam = resolvedSearch == null ? undefined : resolvedSearch.audio;
-  const audioOnlyFromParam =
-    audioParam === "1" ||
-    audioParam === "true" ||
-    (Array.isArray(audioParam) && audioParam.some((v) => v === "1" || v === "true"));
-
-  const clip = await getClip(id);
-
-  if (!clip) {
+  if (status === "loading") {
     return (
       <main className="min-h-screen bg-black px-6 py-16 font-sans text-white">
+        <Head>
+          <title>Loading clip… | Curatd</title>
+        </Head>
+        <div className="mx-auto max-w-4xl py-20 text-center text-sm text-zinc-500">Loading…</div>
+      </main>
+    );
+  }
+
+  if (status === "forbidden") {
+    return (
+      <main className="min-h-screen bg-black px-6 py-16 font-sans text-white">
+        <Head>
+          <title>Cannot load clip | Curatd</title>
+          <meta name="description" content="You don’t have access to this clip." />
+        </Head>
+        <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/30 p-8 text-center">
+          <h1 className="text-xl font-bold">Can&apos;t load this clip</h1>
+          <p className="mt-2 text-sm text-zinc-500">
+            Firestore denied access. Try signing in, or check your connection.
+          </p>
+          <Link
+            href="/"
+            className="mt-6 inline-block text-sm font-semibold text-emerald-500 hover:text-emerald-400"
+          >
+            Back to feed
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <main className="min-h-screen bg-black px-6 py-16 font-sans text-white">
+        <Head>
+          <title>Error | Curatd</title>
+        </Head>
+        <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/30 p-8 text-center">
+          <h1 className="text-xl font-bold">Something went wrong</h1>
+          <p className="mt-2 text-sm text-zinc-500">Could not load this clip. Try again.</p>
+          <Link
+            href="/"
+            className="mt-6 inline-block text-sm font-semibold text-emerald-500 hover:text-emerald-400"
+          >
+            Back to feed
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  if (status === "not_found" || !clip) {
+    return (
+      <main className="min-h-screen bg-black px-6 py-16 font-sans text-white">
+        <Head>
+          <title>Clip not found | Curatd</title>
+          <meta name="description" content="This Curatd clip could not be found." />
+        </Head>
         <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/30 p-8 text-center">
           <h1 className="text-xl font-bold">Clip not found</h1>
           <p className="mt-2 text-sm text-zinc-500">
@@ -180,119 +272,140 @@ export default async function SharedClipPage({ params, searchParams }) {
     );
   }
 
-  const audioOnly = audioOnlyFromParam || clip.audioOnly === true;
-  const videoId = clip.videoId || extractVideoId(clip.videoUrl || clip.url);
-  const primary = getPrimaryMoment(clip);
-  const startSeconds = Math.max(0, Number(primary == null ? 0 : primary.startTime ?? clip.startTime ?? 0) || 0);
-  const endRaw = (primary == null ? undefined : primary.endTime) ?? clip.endTime ?? 0;
-  const endSeconds = typeof endRaw === "number" && endRaw > startSeconds ? endRaw : undefined;
-  const tags = clipTopicTags(clip);
-
-  const youtubeWatchUrl =
-    videoId != null && videoId !== ""
-      ? `https://www.youtube.com/watch?v=${videoId}&t=${Math.floor(startSeconds)}s`
-      : null;
-
   return (
-    <main className="min-h-screen bg-black font-sans text-white">
-      <div className="mx-auto max-w-4xl px-6 py-8">
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
-          <Link href="/" className="text-sm font-bold tracking-tight text-white hover:text-zinc-200">
-            CURATD
-          </Link>
-          <Link href="/" className="text-sm text-zinc-500 transition-colors hover:text-white">
-            Back to feed
-          </Link>
-        </div>
+    <>
+      {og ? (
+        <Head>
+          <title>{og.title}</title>
+          <meta name="description" content={og.description} />
+          <meta property="og:title" content={og.title} />
+          <meta property="og:description" content={og.description} />
+          {og.url ? <meta property="og:url" content={og.url} /> : null}
+          <meta property="og:type" content="article" />
+          {og.image ? <meta property="og:image" content={og.image} /> : null}
+          <meta name="twitter:card" content="summary_large_image" />
+          <meta name="twitter:title" content={og.title} />
+          <meta name="twitter:description" content={og.description} />
+          {og.image ? <meta name="twitter:image" content={og.image} /> : null}
+        </Head>
+      ) : null}
 
-        <div
-          className={`group relative rounded-2xl border transition-colors overflow-hidden ${
-            audioOnly ? "bg-zinc-950/80" : "bg-zinc-900/30"
-          } border-zinc-800/70 hover:border-zinc-700`}
-        >
-          <div className="border-b border-zinc-800 rounded-t-2xl overflow-hidden">
-            {videoId ? (
-              <SharedClipPlayer
-                videoId={videoId}
-                startTime={startSeconds}
-                endTime={endSeconds}
-                audioOnly={audioOnly}
-              />
-            ) : (
-              <div className="aspect-video w-full bg-zinc-950 px-6 py-16 text-center text-sm text-zinc-500">
-                Video unavailable (missing YouTube ID).
-              </div>
-            )}
+      <main className="min-h-screen bg-black font-sans text-white">
+        <div className="mx-auto max-w-4xl px-6 py-8">
+          <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+            <Link href="/" className="text-sm font-bold tracking-tight text-white hover:text-zinc-200">
+              CURATD
+            </Link>
+            <Link href="/" className="text-sm text-zinc-500 transition-colors hover:text-white">
+              Back to feed
+            </Link>
           </div>
 
-          <div className="p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-lg font-semibold text-white leading-snug line-clamp-2">
-                  {clip.title || "Untitled clip"}
+          <div
+            className={`group relative rounded-2xl border transition-colors overflow-hidden ${
+              audioOnly ? "bg-zinc-950/80" : "bg-zinc-900/30"
+            } border-zinc-800/70 hover:border-zinc-700`}
+          >
+            <div className="border-b border-zinc-800 rounded-t-2xl overflow-hidden">
+              {videoId ? (
+                <SharedClipPlayer
+                  videoId={videoId}
+                  startTime={startSeconds}
+                  endTime={endSeconds}
+                  audioOnly={audioOnly}
+                />
+              ) : (
+                <div className="aspect-video w-full bg-zinc-950 px-6 py-16 text-center text-sm text-zinc-500">
+                  Video unavailable (missing YouTube ID).
                 </div>
+              )}
+            </div>
 
-                <ShareActionsRow clipId={String(clip.id)} originalCuratorId={String(clip.userId || "")} />
-
-                <div className="text-sm text-zinc-500 mt-1 truncate">
-                  {clip.channelName || clip.channel || "Unknown channel"}
-                </div>
-
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <span className="text-[11px] font-mono font-semibold bg-emerald-500 text-white px-2.5 py-0.5 rounded-md">
-                    {formatTimestamp(startSeconds)}
-                    {endSeconds != null ? ` – ${formatTimestamp(endSeconds)}` : ""}
-                  </span>
-                </div>
-
-                {tags.length > 0 ? (
-                  <div className="flex flex-wrap items-center gap-2 mt-2">
-                    {tags.slice(0, 12).map((t) => (
-                      <span
-                        key={t}
-                        className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
-                      >
-                        {t}
-                      </span>
-                    ))}
+            <div className="p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-lg font-semibold text-white leading-snug line-clamp-2">
+                    {clip.title || "Untitled clip"}
                   </div>
-                ) : null}
 
-                <div className="mt-2 text-xs text-zinc-500">
-                  Curated by{" "}
-                  {clip.username ? (
-                    <Link href={`/${clip.username}`} className="font-medium text-zinc-300 hover:underline">
-                      @{clip.username}
-                    </Link>
-                  ) : (
-                    <span className="text-zinc-300 font-medium">Unknown curator</span>
-                  )}
-                </div>
+                  <ShareActionsRow clipId={String(clip.id)} originalCuratorId={String(clip.userId || "")} />
 
-                {audioOnly ? (
-                  <div className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-purple-300/80">
-                    Audio only
+                  <div className="text-sm text-zinc-500 mt-1 truncate">
+                    {clip.channelName || clip.channel || "Unknown channel"}
                   </div>
-                ) : null}
 
-                <div className="mt-4 flex items-center gap-4 text-xs">
-                  {youtubeWatchUrl ? (
-                    <a
-                      href={youtubeWatchUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-zinc-500 hover:text-zinc-200 hover:underline underline-offset-2"
-                    >
-                      Watch full video on YouTube
-                    </a>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] font-mono font-semibold bg-emerald-500 text-white px-2.5 py-0.5 rounded-md">
+                      {formatTimestamp(startSeconds)}
+                      {endSeconds != null ? ` – ${formatTimestamp(endSeconds)}` : ""}
+                    </span>
+                  </div>
+
+                  {tags.length > 0 ? (
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
+                      {tags.slice(0, 12).map((t) => (
+                        <span
+                          key={t}
+                          className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
                   ) : null}
+
+                  <div className="mt-2 text-xs text-zinc-500">
+                    Curated by{" "}
+                    {clip.username ? (
+                      <Link href={`/${clip.username}`} className="font-medium text-zinc-300 hover:underline">
+                        @{clip.username}
+                      </Link>
+                    ) : (
+                      <span className="text-zinc-300 font-medium">Unknown curator</span>
+                    )}
+                  </div>
+
+                  {audioOnly ? (
+                    <div className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-purple-300/80">
+                      Audio only
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 flex items-center gap-4 text-xs">
+                    {youtubeWatchUrl ? (
+                      <a
+                        href={youtubeWatchUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-zinc-500 hover:text-zinc-200 hover:underline underline-offset-2"
+                      >
+                        Watch full video on YouTube
+                      </a>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </>
   );
 }
 
+export default function SharedClipPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-black px-6 py-16 font-sans text-white">
+          <Head>
+            <title>Loading clip… | Curatd</title>
+          </Head>
+          <div className="mx-auto max-w-4xl py-20 text-center text-sm text-zinc-500">Loading…</div>
+        </main>
+      }
+    >
+      <ClipPageInner />
+    </Suspense>
+  );
+}
