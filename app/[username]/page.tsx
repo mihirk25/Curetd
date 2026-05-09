@@ -182,8 +182,6 @@ export default function PublicProfilePage() {
         const repostsQ = query(
           collection(db, "reposts"),
           where("repostedByUid", "==", uid),
-          orderBy("repostedAt", "desc"),
-          limit(200),
         );
         const repostsSnap = await getDocs(repostsQ);
 
