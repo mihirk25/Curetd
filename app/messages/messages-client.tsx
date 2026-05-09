@@ -400,13 +400,9 @@ export function MessagesClient() {
     let cancelled = false;
     setIsCurator(null);
     if (!user) return;
-    hasAtLeastOneClip(user.uid)
-      .then((ok) => {
-        if (!cancelled) setIsCurator(ok);
-      })
-      .catch(() => {
-        if (!cancelled) setIsCurator(false);
-      });
+    // Messaging is available to any signed-in user (no curator gate).
+    // Keep the original curator-check function in codebase, but do not use it to gate messaging.
+    if (!cancelled) setIsCurator(true);
     return () => {
       cancelled = true;
     };
@@ -619,8 +615,7 @@ export function MessagesClient() {
       return;
     }
     if (isCurator === false) {
-      setShowCuratorRequiredModal(true);
-      return;
+      // Gate removed: allow any signed-in user to message.
     }
     if (!activeConversationId || !activeConversation) return;
 
@@ -1391,8 +1386,8 @@ export function MessagesClient() {
                   <input
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
-                    placeholder={isCurator === false ? "Post your first clip to start messaging…" : "Write a message…"}
-                    disabled={sending || isCurator === false}
+                    placeholder="Write a message…"
+                    disabled={sending}
                     className="h-12 flex-1 rounded-full border border-zinc-800 bg-zinc-950 px-5 text-sm text-white outline-none placeholder:text-zinc-400 focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/25 disabled:opacity-60"
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
@@ -1403,7 +1398,7 @@ export function MessagesClient() {
                   />
                   <button
                     type="button"
-                    disabled={sending || isCurator === false || !draft.trim()}
+                    disabled={sending || !draft.trim()}
                     onClick={() => void handleSend()}
                     className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white shadow-[0_0_20px_rgba(74,222,128,0.25)] transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
                     aria-label="Send message"
@@ -1425,15 +1420,7 @@ export function MessagesClient() {
                     </svg>
                   </button>
                 </div>
-                {isCurator === false ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowCuratorRequiredModal(true)}
-                    className="mt-2 text-xs font-semibold text-emerald-500 hover:text-emerald-400 transition-colors"
-                  >
-                    Post your first clip to start messaging other curators.
-                  </button>
-                ) : null}
+                {isCurator === false ? null : null}
               </div>
             </div>
           )}

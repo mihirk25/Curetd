@@ -450,10 +450,6 @@ export default function PublicProfilePage() {
               <button
                 type="button"
                 onClick={() => {
-                  if (isCurator === false) {
-                    setShowCuratorRequiredModal(true);
-                    return;
-                  }
                   router.push("/messages");
                 }}
                 className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl text-zinc-200 hover:bg-zinc-900/80 transition-colors"
@@ -724,10 +720,6 @@ export default function PublicProfilePage() {
                                 subtitle: "Messaging is private between two curators.",
                               });
                               setShowAuthModal(true);
-                              return;
-                            }
-                            if (isCurator === false) {
-                              setShowCuratorRequiredModal(true);
                               return;
                             }
                             const convId = getConversationId(user.uid, profile.uid);
