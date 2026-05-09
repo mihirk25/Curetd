@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { collection, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
+import { useAuth } from "./auth-context";
 
 export type CuratorSearchHit = {
   id: string;
@@ -41,6 +42,7 @@ function extractVideoId(url: string) {
 
 export function CuratorSearchBar() {
   const router = useRouter();
+  const { user } = useAuth();
   const [searchText, setSearchText] = useState("");
   const [debouncedPrefix, setDebouncedPrefix] = useState("");
   const [open, setOpen] = useState(false);
@@ -148,6 +150,17 @@ export function CuratorSearchBar() {
   }, [recentClips, debouncedPrefix]);
 
   const anyResults = curatorHits.length > 0 || clipHits.length > 0;
+  const filteredCuratorHits = useMemo(() => {
+    if (!user) return curatorHits;
+    const myUid = String((user as any)?.uid || "");
+    const myUsername = typeof (user as any)?.username === "string" ? String((user as any).username).toLowerCase() : "";
+    return curatorHits.filter((h) => {
+      if (myUid && h.id === myUid) return false;
+      const u = typeof h.username === "string" ? h.username.toLowerCase() : "";
+      if (myUsername && u && u === myUsername) return false;
+      return true;
+    });
+  }, [curatorHits, user]);
 
   return (
     <div ref={wrapRef} className="relative w-[300px] max-w-full">
@@ -184,12 +197,12 @@ export function CuratorSearchBar() {
             <div className="px-3 py-3 text-center text-sm text-zinc-500">No results found</div>
           ) : (
             <div className="py-1">
-              {curatorHits.length > 0 ? (
+              {filteredCuratorHits.length > 0 ? (
                 <>
                   <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider font-bold text-zinc-500">
                     Curators
                   </div>
-                  {curatorHits.map((h) => (
+                  {filteredCuratorHits.map((h) => (
                     <Link
                       key={h.id}
                       href={`/${h.username}`}
