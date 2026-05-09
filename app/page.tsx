@@ -14,6 +14,7 @@ import { updateProfile } from "firebase/auth";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { useUnreadMessageCount } from "./messages/use-unread-count";
 import { CURATD_TOPICS } from "./lib/topics";
+import { SendClipModal } from "./components/SendClipModal";
 import {
   followUser,
   getFollowerCount,
@@ -862,6 +863,15 @@ export default function CuratdMVP() {
   const [commentsByClipId, setCommentsByClipId] = useState<Record<string, any[]>>({});
   const [commentDraftByClipId, setCommentDraftByClipId] = useState<Record<string, string>>({});
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
+  const [sendClipModalOpen, setSendClipModalOpen] = useState(false);
+  const [sendClipPayload, setSendClipPayload] = useState<{
+    title?: string;
+    videoId?: string;
+    startTime?: number;
+    endTime?: number;
+    topic?: string;
+    channel?: string;
+  } | null>(null);
   const [onboardingStep, setOnboardingStep] = useState<1 | 2 | null>(null);
   const [visitorSelectedCurators, setVisitorSelectedCurators] = useState<string[]>([]);
   const [curatorTopicsDraft, setCuratorTopicsDraft] = useState<string[]>([]);
@@ -3524,6 +3534,52 @@ export default function CuratdMVP() {
                           <button
                             type="button"
                             onClick={() => {
+                              if (!user) {
+                                setShowAuthModal(true);
+                                return;
+                              }
+                              setSendClipPayload({
+                                title: typeof clip?.title === "string" ? clip.title : undefined,
+                                videoId: typeof vid === "string" ? vid : undefined,
+                                startTime:
+                                  typeof primaryMoment?.startTime === "number"
+                                    ? primaryMoment.startTime
+                                    : typeof clip?.startTime === "number"
+                                      ? clip.startTime
+                                      : undefined,
+                                endTime:
+                                  typeof primaryMoment?.endTime === "number"
+                                    ? primaryMoment.endTime
+                                    : typeof clip?.endTime === "number"
+                                      ? clip.endTime
+                                      : undefined,
+                                topic: typeof clip?.topic === "string" ? clip.topic : typeof primaryMoment?.topic === "string" ? primaryMoment.topic : undefined,
+                                channel: typeof clip?.channel === "string" ? clip.channel : undefined,
+                              });
+                              setSendClipModalOpen(true);
+                            }}
+                            className="inline-flex items-center justify-center h-8 w-8 rounded-full border border-zinc-700 text-zinc-300 hover:bg-zinc-800/60 transition-colors"
+                            aria-label="Send clip"
+                            title="Send clip"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                              <path
+                                d="M22 2 11 13"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                              />
+                              <path
+                                d="M22 2 15 22l-4-9-9-4 20-7Z"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
                               if (!vid) return;
                               window.open(`https://www.youtube.com/watch?v=${vid}&t=${clip.startTime || 0}s`, '_blank');
                             }}
@@ -3550,6 +3606,15 @@ export default function CuratdMVP() {
         subtitle={authModalCopy.subtitle}
       />
       <CuratorRequiredModal open={showCuratorRequiredModal} onClose={() => setShowCuratorRequiredModal(false)} />
+      <SendClipModal
+        open={sendClipModalOpen}
+        onClose={() => {
+          setSendClipModalOpen(false);
+          setSendClipPayload(null);
+        }}
+        currentUserId={user?.uid || null}
+        clip={sendClipPayload}
+      />
 
       {toastMessage ? (
         <div className="fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 rounded-full border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-white shadow-xl">
