@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { getAdminDb } from "../../../src/lib/firebaseAdmin";
+import { getAdminAuth, getAdminDb } from "../../../src/lib/firebaseAdmin";
 
 type FindSourceResponse = {
   transcript: string;
@@ -9,6 +9,12 @@ type FindSourceResponse = {
   recommendations: Array<{ url: string; title: string }>;
   verificationFailed?: boolean;
 };
+
+type JsonRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function buildPrompt(shortUrl: string) {
   return `You are helping find the original long-form source of a YouTube Short.
@@ -43,7 +49,7 @@ Return your response as JSON only in this format:
 `;
 }
 
-function extractJson(text: string): any {
+function extractJson(text: string): unknown {
   const t = String(text || "").trim();
   const noFences = t.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
   const first = noFences.indexOf("{");
@@ -55,14 +61,14 @@ function extractJson(text: string): any {
   return JSON.parse(jsonText);
 }
 
-function coerceResponse(raw: any): FindSourceResponse {
-  const transcript = typeof raw?.transcript === "string" ? raw.transcript : "";
-  const found = Boolean(raw?.found);
+function coerceResponse(raw: unknown): FindSourceResponse {
+  const data = isRecord(raw) ? raw : {};
+  const transcript = typeof data.transcript === "string" ? data.transcript : "";
+  const found = Boolean(data.found);
 
-  const exactRaw = raw?.exact;
+  const exactRaw = data.exact;
   const exact =
-    exactRaw &&
-    typeof exactRaw === "object" &&
+    isRecord(exactRaw) &&
     typeof exactRaw.url === "string" &&
     typeof exactRaw.title === "string"
       ? {
@@ -72,25 +78,29 @@ function coerceResponse(raw: any): FindSourceResponse {
         }
       : null;
 
-  const recsRaw = Array.isArray(raw?.recommendations) ? raw.recommendations : [];
+  const recsRaw = Array.isArray(data.recommendations) ? data.recommendations : [];
   const recommendations = recsRaw
-    .map((r: any) => ({
-      url: typeof r?.url === "string" ? r.url : "",
-      title: typeof r?.title === "string" ? r.title : "",
-    }))
+    .map((r: unknown) => {
+      const rec = isRecord(r) ? r : {};
+      return {
+        url: typeof rec.url === "string" ? rec.url : "",
+        title: typeof rec.title === "string" ? rec.title : "",
+      };
+    })
     .filter((r: { url: string; title: string }) => r.url && r.title)
     .slice(0, 5);
 
   return { transcript, found, exact, recommendations };
 }
 
+function getBearerToken(req: Request) {
+  const authHeader = req.headers.get("authorization") || "";
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || "";
+}
+
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: "Missing GEMINI_API_KEY" }, { status: 500 });
-    }
-
     const body = (await req.json().catch(() => null)) as
       | { shortUrl?: unknown; clipId?: unknown }
       | null;
@@ -103,6 +113,31 @@ export async function POST(req: Request) {
     }
     if (!clipId) {
       return NextResponse.json({ error: "clipId is required" }, { status: 400 });
+    }
+
+    const token = getBearerToken(req);
+    if (!token) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+
+    const decodedToken = await getAdminAuth().verifyIdToken(token).catch(() => null);
+    if (!decodedToken?.uid) {
+      return NextResponse.json({ error: "Invalid authentication token" }, { status: 401 });
+    }
+
+    const adminDb = getAdminDb();
+    const clipRef = adminDb.collection("clips").doc(clipId);
+    const clipSnap = await clipRef.get();
+    if (!clipSnap.exists) {
+      return NextResponse.json({ error: "Clip not found" }, { status: 404 });
+    }
+    if (clipSnap.get("userId") !== decodedToken.uid) {
+      return NextResponse.json({ error: "Not allowed to update this clip" }, { status: 403 });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json({ error: "Missing GEMINI_API_KEY" }, { status: 500 });
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
@@ -139,11 +174,10 @@ export async function POST(req: Request) {
     }
 
     // Persist to Firestore using Admin SDK.
-    const adminDb = getAdminDb();
-    await adminDb.collection("clips").doc(clipId).set({ sourceData }, { merge: true });
+    await clipRef.set({ sourceData }, { merge: true });
 
     return NextResponse.json(sourceData);
-  } catch (e: any) {
+  } catch (e: unknown) {
     const message = e && typeof e === "object" && "message" in e ? String(e.message) : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
