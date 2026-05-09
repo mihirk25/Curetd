@@ -1,6 +1,20 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function signedInUserIn(participants) {
+      return signedIn() && request.auth.uid in participants;
+    }
+
+    function isConversationParticipant(conversationId) {
+      return signedInUserIn(
+        get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants
+      );
+    }
+
     // Unique handles: public read; create/delete when the authenticated user matches { uid }.
     match /usernames/{uname} {
       allow read: if true;
@@ -41,11 +55,18 @@ service cloud.firestore {
     }
 
     match /conversations/{id} {
-      allow read, write: if request.auth != null;
+      allow create: if signedInUserIn(request.resource.data.participants);
+      allow read, update, delete: if signedInUserIn(resource.data.participants);
     }
 
     match /conversations/{id}/messages/{mid} {
-      allow read, write: if request.auth != null;
+      allow read: if isConversationParticipant(id);
+      allow create: if isConversationParticipant(id)
+        && request.resource.data.senderId == request.auth.uid;
+      allow update: if isConversationParticipant(id)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read == true;
+      allow delete: if isConversationParticipant(id);
     }
   }
 }
