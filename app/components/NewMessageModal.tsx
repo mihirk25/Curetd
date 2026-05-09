@@ -6,6 +6,7 @@ import {
   collection,
   documentId,
   getDocs,
+  orderBy,
   query,
   serverTimestamp,
   where,
@@ -45,7 +46,8 @@ export function NewMessageModal(props: {
   useEffect(() => {
     if (!open) return;
     if (!currentUserId) return;
-    const q = qText.trim().toLowerCase();
+    const raw = qText.trim().replace(/^@+/, "");
+    const q = raw.trim().toLowerCase();
     if (!q) {
       setResults([]);
       return;
@@ -56,23 +58,46 @@ export function NewMessageModal(props: {
     const t = window.setTimeout(() => {
       void (async () => {
         try {
-          // usernames collection is keyed by the username (doc id). Query by documentId range.
-          const qy = query(
+          // Search in parallel:
+          // - usernames collection (username is doc id)
+          // - users collection by displayName prefix
+          const byUsernameQ = query(
             collection(db, "usernames"),
             where(documentId(), ">=", q),
             where(documentId(), "<=", q + "\uf8ff"),
             limit(10),
           );
-          const snap = await getDocs(qy);
+          const byNameQ = query(
+            collection(db, "users"),
+            orderBy("displayName"),
+            where("displayName", ">=", raw),
+            where("displayName", "<=", raw + "\uf8ff"),
+            limit(10),
+          );
+
+          const [usernamesSnap, usersSnap] = await Promise.all([getDocs(byUsernameQ), getDocs(byNameQ)]);
           if (cancelled) return;
-          const hits: UsernameHit[] = snap.docs
-            .map((d) => {
-              const data: any = d.data() as any;
-              const uid = String(data?.uid || data?.userId || "");
-              return { username: d.id, uid };
-            })
-            .filter((h) => h.uid && h.uid !== currentUserId);
-          setResults(hits);
+
+          const merged = new Map<string, UsernameHit>();
+
+          for (const d of usernamesSnap.docs) {
+            const data: any = d.data() as any;
+            const uid = String(data?.uid || data?.userId || "");
+            const username = d.id;
+            if (!uid || uid === currentUserId) continue;
+            if (username) merged.set(uid, { uid, username });
+          }
+
+          for (const d of usersSnap.docs) {
+            const data: any = d.data() as any;
+            const uid = d.id;
+            const username = typeof data?.username === "string" ? String(data.username) : "";
+            if (!uid || uid === currentUserId) continue;
+            if (!username) continue;
+            if (!merged.has(uid)) merged.set(uid, { uid, username });
+          }
+
+          setResults([...merged.values()]);
         } catch {
           if (!cancelled) setResults([]);
         } finally {
@@ -152,10 +177,10 @@ export function NewMessageModal(props: {
           <input
             value={qText}
             onChange={(e) => setQText(e.target.value)}
-            placeholder="Search usernames…"
+            placeholder="Search by name or username"
             className="w-full h-11 rounded-2xl border border-zinc-800 bg-black px-4 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none focus:border-zinc-600"
           />
-          <div className="mt-2 text-[11px] text-zinc-500">Search uses prefix match on usernames.</div>
+          <div className="mt-2 text-[11px] text-zinc-500">Prefix search by username or display name.</div>
         </div>
 
         {tab === "group" ? (
@@ -197,7 +222,7 @@ export function NewMessageModal(props: {
             <div className="py-10 text-center text-sm text-zinc-500">Searching…</div>
           ) : results.length === 0 ? (
             <div className="py-10 text-center text-sm text-zinc-500">
-              {qText.trim() ? "No users found." : "Start typing to search."}
+              {qText.trim().replace(/^@+/, "") ? "No users found." : "Start typing to search."}
             </div>
           ) : (
             results.map((u) => {
