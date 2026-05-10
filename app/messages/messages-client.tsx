@@ -352,8 +352,6 @@ export function MessagesClient() {
   const [profilesByUid, setProfilesByUid] = useState<Record<string, UserMini>>({});
   const usernameCacheRef = useRef<Record<string, UserMini>>({});
   const missingConversationFetchRef = useRef<Record<string, boolean>>({});
-  const [openConversationMenuId, setOpenConversationMenuId] = useState<string | null>(null);
-  const [confirmDeleteConversationId, setConfirmDeleteConversationId] = useState<string | null>(null);
 
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<
@@ -770,21 +768,7 @@ export function MessagesClient() {
                           <div className="flex items-start justify-between gap-2">
                             <div className="text-sm font-bold text-white truncate">{displayName}</div>
                             <div className="flex items-center gap-2 shrink-0">
-                              <div className="text-[11px] text-zinc-500 tabular-nums group-hover:hidden">{ts}</div>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  setConfirmDeleteConversationId(null);
-                                  setOpenConversationMenuId((prev) => (prev === c.id ? null : c.id));
-                                }}
-                                className="hidden group-hover:inline-flex h-7 w-7 items-center justify-center rounded-full border border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-white hover:bg-zinc-900"
-                                aria-label="Conversation options"
-                                title="Options"
-                              >
-                                …
-                              </button>
+                              <div className="text-[11px] text-zinc-500 tabular-nums">{ts}</div>
                             </div>
                           </div>
                           <div className="mt-1 flex items-center justify-between gap-2">
@@ -795,82 +779,6 @@ export function MessagesClient() {
                           </div>
                         </div>
                       </div>
-
-                      {openConversationMenuId === c.id ? (
-                        <div
-                          className="relative"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                          }}
-                        >
-                          <div className="absolute right-0 top-0 z-20 mt-2 w-44 rounded-2xl border border-zinc-800 bg-zinc-950 p-2 shadow-xl">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setConfirmDeleteConversationId(c.id);
-                              }}
-                              className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-900/70"
-                            >
-                              <span className="text-zinc-400" aria-hidden>🗑</span>
-                              Delete conversation
-                            </button>
-
-                            {confirmDeleteConversationId === c.id ? (
-                              <div className="mt-2 rounded-xl border border-zinc-800 bg-black/30 p-2">
-                                <div className="text-[11px] font-semibold text-zinc-200">Delete?</div>
-                                <div className="mt-2 flex items-center justify-between gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      setConfirmDeleteConversationId(null);
-                                    }}
-                                    className="text-[11px] font-semibold text-zinc-400 hover:text-white"
-                                  >
-                                    No
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={async (e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      setConfirmDeleteConversationId(null);
-                                      setOpenConversationMenuId(null);
-
-                                      // Optimistically remove from UI
-                                      setConversations((prev) => prev.filter((x) => x.id !== c.id));
-                                      if (activeConversationId === c.id) {
-                                        setActiveConversationId(null);
-                                        router.push("/messages");
-                                      }
-
-                                      try {
-                                        const snap = await getDocs(collection(db, "conversations", c.id, "messages"));
-                                        await Promise.all(snap.docs.map((d) => deleteDoc(doc(db, "conversations", c.id, "messages", d.id))));
-                                      } catch {
-                                        // ignore
-                                      }
-
-                                      try {
-                                        await deleteDoc(doc(db, "conversations", c.id));
-                                      } catch {
-                                        // ignore
-                                      }
-                                    }}
-                                    className="text-[11px] font-semibold text-red-300 hover:text-red-200"
-                                  >
-                                    Yes
-                                  </button>
-                                </div>
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-                      ) : null}
                     </div>
                   );
                 })}
