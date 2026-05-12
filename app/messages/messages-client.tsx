@@ -139,6 +139,10 @@ function profileImageUrl(p: UserMini | null | undefined): string | null {
   return typeof url === "string" && url.trim() ? url.trim() : null;
 }
 
+function isConversationDeletedFor(data: { deletedBy?: Record<string, unknown> } | null | undefined, uid: string | null | undefined) {
+  return Boolean(uid && data?.deletedBy && data.deletedBy[uid]);
+}
+
 function toSeconds(hr: string, min: string, sec: string) {
   const h = Math.max(0, Number.parseInt(String(hr || "0"), 10) || 0);
   const m = Math.max(0, Number.parseInt(String(min || "0"), 10) || 0);
@@ -421,7 +425,11 @@ export function MessagesClient() {
     const unsub = onSnapshot(
       q,
       (snap) => {
-        setConversations(snap.docs.map((d) => ({ id: d.id, data: d.data() as any })));
+        setConversations(
+          snap.docs
+            .map((d) => ({ id: d.id, data: d.data() as any }))
+            .filter((c) => !isConversationDeletedFor(c.data, user.uid)),
+        );
       },
       () => {
         setConversations([]);
@@ -442,6 +450,7 @@ export function MessagesClient() {
         const snap = await getDoc(doc(db, "conversations", activeConversationId));
         if (cancelled) return;
         if (!snap.exists()) return;
+        if (isConversationDeletedFor(snap.data() as any, user.uid)) return;
         setConversations((prev) => {
           if (prev.some((c) => c.id === activeConversationId)) return prev;
           return [{ id: activeConversationId, data: snap.data() as any }, ...prev];
@@ -838,6 +847,7 @@ export function MessagesClient() {
                                     onClick={async (e) => {
                                       e.preventDefault();
                                       e.stopPropagation();
+                                      if (!user) return;
                                       setConfirmDeleteConversationId(null);
                                       setOpenConversationMenuId(null);
 
@@ -849,14 +859,10 @@ export function MessagesClient() {
                                       }
 
                                       try {
-                                        const snap = await getDocs(collection(db, "conversations", c.id, "messages"));
-                                        await Promise.all(snap.docs.map((d) => deleteDoc(doc(db, "conversations", c.id, "messages", d.id))));
-                                      } catch {
-                                        // ignore
-                                      }
-
-                                      try {
-                                        await deleteDoc(doc(db, "conversations", c.id));
+                                        await updateDoc(doc(db, "conversations", c.id), {
+                                          [`deletedBy.${user.uid}`]: serverTimestamp(),
+                                          [`unreadBy.${user.uid}`]: 0,
+                                        });
                                       } catch {
                                         // ignore
                                       }

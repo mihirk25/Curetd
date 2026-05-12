@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   increment,
   serverTimestamp,
@@ -13,6 +14,7 @@ export type ConversationDoc = {
   lastMessage?: string;
   lastMessageAt?: any;
   unreadBy?: Record<string, number | FieldValue>;
+  deletedBy?: Record<string, FieldValue>;
 };
 
 export type MessageDoc = {
@@ -49,6 +51,10 @@ export async function sendMessage(args: {
     lastMessageAt: serverTimestamp(),
     unreadBy: {
       [otherId]: increment(1),
+    },
+    deletedBy: {
+      [args.senderId]: deleteField(),
+      [otherId]: deleteField(),
     },
   } satisfies ConversationDoc, { merge: true });
 

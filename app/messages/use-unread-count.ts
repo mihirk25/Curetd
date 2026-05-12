@@ -19,7 +19,12 @@ export function useUnreadMessageCount(uid: string | null | undefined) {
       (snap) => {
         let n = 0;
         for (const d of snap.docs) {
-          const unreadBy = (d.data() as any)?.unreadBy;
+          const data = d.data() as {
+            deletedBy?: Record<string, unknown>;
+            unreadBy?: Record<string, unknown>;
+          };
+          if (data?.deletedBy?.[key]) continue;
+          const unreadBy = data?.unreadBy;
           n += Math.max(0, Number(unreadBy?.[key] ?? 0));
         }
         setCount(n);
