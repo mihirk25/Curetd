@@ -19,6 +19,10 @@ type ConversationRow = {
   data: any;
 };
 
+function isConversationDeletedFor(data: any, uid: string | null | undefined) {
+  return Boolean(uid && data?.deletedBy && data.deletedBy[uid]);
+}
+
 export function SendClipModal(props: {
   open: boolean;
   onClose: () => void;
@@ -47,7 +51,11 @@ export function SendClipModal(props: {
         );
         const snap = await getDocs(q);
         if (cancelled) return;
-        setConversations(snap.docs.map((d) => ({ id: d.id, data: d.data() as any })));
+        setConversations(
+          snap.docs
+            .map((d) => ({ id: d.id, data: d.data() as any }))
+            .filter((c) => !isConversationDeletedFor(c.data, currentUserId)),
+        );
       } catch {
         if (!cancelled) setConversations([]);
       } finally {

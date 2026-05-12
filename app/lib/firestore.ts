@@ -63,6 +63,7 @@ export async function sendMessage(
   const {
     addDoc,
     collection: fsCollection,
+    deleteField: fsDeleteField,
     doc: fsDoc,
     getDoc: fsGetDoc,
     increment: fsIncrement,
@@ -105,6 +106,10 @@ export async function sendMessage(
   for (const uid of participants) {
     if (!uid || uid === senderId) continue;
     updates[`unreadBy.${uid}`] = fsIncrement(1);
+  }
+  for (const uid of participants) {
+    if (!uid) continue;
+    updates[`deletedBy.${uid}`] = fsDeleteField();
   }
 
   await fsUpdateDoc(convRef, updates);
