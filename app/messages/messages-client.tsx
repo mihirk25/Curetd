@@ -139,7 +139,7 @@ function profileImageUrl(p: UserMini | null | undefined): string | null {
   return typeof url === "string" && url.trim() ? url.trim() : null;
 }
 
-function isConversationDeletedFor(data: any, uid: string | null | undefined) {
+function isConversationDeletedFor(data: { deletedBy?: Record<string, unknown> } | null | undefined, uid: string | null | undefined) {
   return Boolean(uid && data?.deletedBy && data.deletedBy[uid]);
 }
 

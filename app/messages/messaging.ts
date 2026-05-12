@@ -14,7 +14,7 @@ export type ConversationDoc = {
   lastMessage?: string;
   lastMessageAt?: any;
   unreadBy?: Record<string, number | FieldValue>;
-  deletedBy?: Record<string, any>;
+  deletedBy?: Record<string, FieldValue>;
 };
 
 export type MessageDoc = {

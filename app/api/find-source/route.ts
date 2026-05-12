@@ -45,7 +45,7 @@ Return your response as JSON only in this format:
 `;
 }
 
-function extractJson(text: string): any {
+function extractJson(text: string): unknown {
   const t = String(text || "").trim();
   const noFences = t.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
   const first = noFences.indexOf("{");
@@ -57,14 +57,18 @@ function extractJson(text: string): any {
   return JSON.parse(jsonText);
 }
 
-function coerceResponse(raw: any): FindSourceResponse {
-  const transcript = typeof raw?.transcript === "string" ? raw.transcript : "";
-  const found = Boolean(raw?.found);
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
 
-  const exactRaw = raw?.exact;
+function coerceResponse(raw: unknown): FindSourceResponse {
+  const data = asRecord(raw);
+  const transcript = typeof data?.transcript === "string" ? data.transcript : "";
+  const found = Boolean(data?.found);
+
+  const exactRaw = asRecord(data?.exact);
   const exact =
     exactRaw &&
-    typeof exactRaw === "object" &&
     typeof exactRaw.url === "string" &&
     typeof exactRaw.title === "string"
       ? {
@@ -74,12 +78,15 @@ function coerceResponse(raw: any): FindSourceResponse {
         }
       : null;
 
-  const recsRaw = Array.isArray(raw?.recommendations) ? raw.recommendations : [];
+  const recsRaw = Array.isArray(data?.recommendations) ? data.recommendations : [];
   const recommendations = recsRaw
-    .map((r: any) => ({
-      url: typeof r?.url === "string" ? r.url : "",
-      title: typeof r?.title === "string" ? r.title : "",
-    }))
+    .map((r) => {
+      const rec = asRecord(r);
+      return {
+        url: typeof rec?.url === "string" ? rec.url : "",
+        title: typeof rec?.title === "string" ? rec.title : "",
+      };
+    })
     .filter((r: { url: string; title: string }) => r.url && r.title)
     .slice(0, 5);
 
@@ -175,7 +182,7 @@ export async function POST(req: Request) {
     await clipRef.set({ sourceData }, { merge: true });
 
     return NextResponse.json(sourceData);
-  } catch (e: any) {
+  } catch (e: unknown) {
     const message = e && typeof e === "object" && "message" in e ? String(e.message) : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

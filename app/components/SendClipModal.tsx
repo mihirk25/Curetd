@@ -19,7 +19,7 @@ type ConversationRow = {
   data: any;
 };
 
-function isConversationDeletedFor(data: any, uid: string | null | undefined) {
+function isConversationDeletedFor(data: { deletedBy?: Record<string, unknown> } | null | undefined, uid: string | null | undefined) {
   return Boolean(uid && data?.deletedBy && data.deletedBy[uid]);
 }
 
