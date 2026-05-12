@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { updateProfile } from "firebase/auth";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import {
+  addDoc,
   collection,
   deleteDoc,
   doc,
@@ -36,29 +37,11 @@ import {
   isFollowing,
   unfollowUser,
 } from "../lib/firestore";
-
-function extractVideoId(url: string) {
-  if (!url) return null;
-  const patterns = [
-    /(?:youtube\.com\/watch\?v=)([a-zA-Z0-9_-]{11})/,
-    /(?:youtu\.be\/)([a-zA-Z0-9_-]{11})/,
-    /(?:youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
-    /(?:youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
-  ];
-  for (const p of patterns) {
-    const m = url.match(p);
-    if (m) return m[1];
-  }
-  return null;
-}
-
-function formatDuration(start: number, end: number) {
-  if (!end) return "";
-  const diff = Math.max(0, end - start);
-  const m = Math.floor(diff / 60);
-  const s = diff % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
+import { extractVideoId, formatTimestamp, toSeconds } from "../lib/clip-playback";
+import { toSlug } from "../lib/slug";
+import { ClipYoutubeModal } from "../components/clip-youtube-modal";
+import { NewCollectionModal } from "../components/new-collection-modal";
+import { CollectionAddClipsModal } from "../components/collection-add-clips-modal";
 
 function formatRelativeTime(createdAt: any) {
   const ms =
@@ -117,7 +100,7 @@ export default function PublicProfilePage() {
   } | null>(null);
   const [clips, setClips] = useState<any[]>([]);
   const [topicSearch, setTopicSearch] = useState("");
-  const [playingClip, setPlayingClip] = useState<string | null>(null);
+  const [selectedClip, setSelectedClip] = useState<any | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authModalCopy, setAuthModalCopy] = useState<{ title: string; subtitle: string }>({
     title: "Sign in to follow curators",
@@ -138,6 +121,13 @@ export default function PublicProfilePage() {
   const [navUploadingPhoto, setNavUploadingPhoto] = useState(false);
   const [navPhotoUrl, setNavPhotoUrl] = useState<string | null>(null);
 
+  const [collections, setCollections] = useState<Array<{ id: string } & Record<string, unknown>>>([]);
+  const [newCollectionOpen, setNewCollectionOpen] = useState(false);
+  const [createCollectionBusy, setCreateCollectionBusy] = useState(false);
+  const [addClipsCollection, setAddClipsCollection] = useState<{ id: string; clipIds: string[]; slug: string } | null>(
+    null,
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -146,7 +136,6 @@ export default function PublicProfilePage() {
       setNotFound(false);
       setProfile(null);
       setClips([]);
-      setPlayingClip(null);
 
       if (!username) {
         setNotFound(true);
@@ -209,6 +198,7 @@ export default function PublicProfilePage() {
               id: clipSnap.id,
               ...clipSnap.data(),
               __repost: true,
+              __repostDocId: d.id,
               __repostedAt: data?.repostedAt ?? null,
               __repostedByUsername: username,
               __originalCuratorId: String(data?.originalCuratorId || ""),
@@ -319,9 +309,70 @@ export default function PublicProfilePage() {
     });
   }, [clips, topicSearch]);
 
+  const handleCreateCollection = useCallback(
+    async (payload: { title: string; description: string; topic: string }) => {
+      if (!user || !profile || user.uid !== profile.uid) return;
+      let base = toSlug(payload.title);
+      if (!base) base = "collection";
+      let slug = base;
+      let n = 0;
+      for (;;) {
+        const dup = await getDocs(
+          query(
+            collection(db, "collections"),
+            where("userId", "==", profile.uid),
+            where("slug", "==", slug),
+            limit(1),
+          ),
+        );
+        if (dup.empty) break;
+        n += 1;
+        slug = `${base}-${n}`;
+      }
+      setCreateCollectionBusy(true);
+      try {
+        await addDoc(collection(db, "collections"), {
+          title: payload.title,
+          description: payload.description || "",
+          topic: payload.topic || "",
+          slug,
+          userId: profile.uid,
+          username: profile.username.toLowerCase(),
+          photoURL: profile.photoURL ?? null,
+          clipIds: [],
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        setNewCollectionOpen(false);
+      } catch (e) {
+        console.error(e);
+        alert("Could not create collection.");
+      } finally {
+        setCreateCollectionBusy(false);
+      }
+    },
+    [user, profile],
+  );
+
   useEffect(() => {
-    setPlayingClip(null);
-  }, [topicSearch]);
+    if (!profile?.uid) {
+      setCollections([]);
+      return;
+    }
+    const q = query(
+      collection(db, "collections"),
+      where("userId", "==", profile.uid),
+      orderBy("createdAt", "desc"),
+    );
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setCollections(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      },
+      () => setCollections([]),
+    );
+    return () => unsub();
+  }, [profile?.uid]);
 
   useEffect(() => {
     setTopicSearch("");
@@ -586,7 +637,23 @@ export default function PublicProfilePage() {
         </div>
       </header>
 
-      <div className="max-w-3xl mx-auto w-full flex-1 px-6 py-10">
+      <div className="flex min-h-0 w-full flex-1">
+        <aside className="hidden w-56 shrink-0 flex-col gap-1 border-r border-zinc-800/60 px-3 pt-6 lg:flex">
+          <span className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">Menu</span>
+          <Link
+            href="/"
+            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white"
+          >
+            🏠 Home
+          </Link>
+          <Link
+            href="/explore"
+            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white"
+          >
+            🔍 Explore
+          </Link>
+        </aside>
+        <main className="min-w-0 flex-1 px-4 py-6">
         {loading ? (
           <div className="text-zinc-500 text-sm">Loading…</div>
         ) : notFound || !profile ? (
@@ -812,90 +879,94 @@ export default function PublicProfilePage() {
                   </p>
                 </div>
               ) : (
-                filteredClips.map((clip, idx) => {
-                  const moments = Array.isArray(clip?.moments) ? clip.moments : null;
-                  const primary = moments && moments.length > 0 ? moments[0] : null;
-                  const clipUrl = clip.videoUrl || clip.url;
-                  const vid = clip.videoId || extractVideoId(clipUrl);
-                  const isPlaying = playingClip === clip.id;
-                  const embedUrl = vid
-                    ? `https://www.youtube.com/embed/${vid}?start=${primary?.startTime ?? clip.startTime ?? 0}${(primary?.endTime ?? clip.endTime) ? `&end=${primary?.endTime ?? clip.endTime}` : ""}&autoplay=1&rel=0&iv_load_policy=3`
-                    : "";
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {filteredClips.map((clip) => {
+                    const listKey =
+                      clip.__repost && clip.__repostDocId
+                        ? `${clip.id}__repost__${clip.__repostDocId}`
+                        : String(clip.id);
+                    const moments = Array.isArray(clip?.moments) ? clip.moments : null;
+                    const primary = moments && moments.length > 0 ? moments[0] : null;
+                    const clipUrl = clip.videoUrl || clip.url;
+                    const vid = clip.videoId || extractVideoId(clipUrl);
+                    const startSec = Math.max(
+                      0,
+                      Math.floor(toSeconds(String(primary?.startTime ?? clip.startTime ?? 0))),
+                    );
+                    const endParsed = Math.max(
+                      0,
+                      Math.floor(toSeconds(String(primary?.endTime ?? clip.endTime ?? 0))),
+                    );
+                    const hasEnd = endParsed > startSec && endParsed > 0;
+                    const timeRangeLabel = hasEnd
+                      ? `${formatTimestamp(startSec)} – ${formatTimestamp(endParsed)}`
+                      : vid
+                        ? formatTimestamp(startSec)
+                        : "";
 
-                  return (
-                    <div
-                      key={clip.id}
-                      className={`group relative rounded-2xl border bg-zinc-900/30 transition-colors overflow-hidden ${
-                        idx === 0
-                          ? "border-blue-500/40 hover:border-blue-500/60"
-                          : "border-zinc-800/70 hover:border-zinc-700"
-                      }`}
-                    >
-                      {clip.__repost ? (
-                        <div className="px-5 pt-4 text-xs font-semibold text-zinc-300">
-                          🔁 Reposted by{" "}
-                          <span className="text-zinc-200">@{String(clip.__repostedByUsername || "").trim() || "unknown"}</span>
-                        </div>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!vid) return;
-                          setPlayingClip((prev) => (prev === clip.id ? null : clip.id));
-                        }}
-                        className="block w-full text-left"
-                        aria-label={isPlaying ? "Stop clip" : "Play clip"}
+                    return (
+                      <article
+                        key={listKey}
+                        className="flex flex-col bg-zinc-950 rounded-xl overflow-hidden border border-zinc-800/60 hover:border-zinc-700 transition-colors"
                       >
-                        <div className="relative aspect-video w-full bg-zinc-950 border-b border-zinc-800 rounded-t-2xl overflow-hidden">
-                          {isPlaying && vid ? (
-                            <iframe
-                              width="100%"
-                              height="100%"
-                              src={embedUrl}
-                              title={clip.title || "Clip"}
-                              frameBorder="0"
-                              allowFullScreen
-                              className="absolute inset-0 w-full h-full"
+                        {clip.__repost ? (
+                          <div className="px-2 py-1.5 text-[11px] font-medium text-zinc-400 border-b border-zinc-800/60">
+                            🔁 Curated by{" "}
+                            <span className="text-zinc-200">
+                              @{String(clip.__repostedByUsername || "").trim() || "unknown"}
+                            </span>
+                          </div>
+                        ) : null}
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!vid) return;
+                            setSelectedClip(clip);
+                          }}
+                          disabled={!vid}
+                          className={`relative aspect-video w-full overflow-hidden bg-zinc-900 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 disabled:pointer-events-none disabled:opacity-60 ${clip.__repost ? "rounded-none" : "rounded-t-xl"}`}
+                          aria-label="Play clip"
+                        >
+                          {vid ? (
+                            <img
+                              src={`https://img.youtube.com/vi/${vid}/mqdefault.jpg`}
+                              alt=""
+                              className="h-full w-full object-cover"
                             />
                           ) : (
-                            <>
-                              {vid ? (
-                                <img
-                                  src={`https://img.youtube.com/vi/${vid}/mqdefault.jpg`}
-                                  alt={clip.title || "Video thumbnail"}
-                                  className="absolute inset-0 w-full h-full object-cover"
-                                />
-                              ) : null}
-                              <div className="absolute inset-0 bg-black/10 group-hover:bg-black/30 transition-colors" />
-                              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                <div className="w-16 h-16 rounded-full bg-black/40 border border-white/25 backdrop-blur-sm flex items-center justify-center">
-                                  <div
-                                    className="ml-1"
-                                    style={{
-                                      width: 0,
-                                      height: 0,
-                                      borderLeft: "18px solid white",
-                                      borderTop: "12px solid transparent",
-                                      borderBottom: "12px solid transparent",
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                            </>
+                            <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
+                              <svg
+                                width="40"
+                                height="40"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                                className="text-zinc-600"
+                                aria-hidden
+                              >
+                                <path d="M8 5v14l11-7L8 5z" />
+                              </svg>
+                            </div>
                           )}
-                        </div>
-                      </button>
+                          {timeRangeLabel ? (
+                            <span className="pointer-events-none absolute bottom-2 right-2 rounded-md bg-black/80 px-2 py-0.5 text-xs font-medium text-white">
+                              {timeRangeLabel}
+                            </span>
+                          ) : null}
+                        </button>
 
-                      <div className="p-5">
-                        <div className="min-w-0">
-                          <div className="text-lg font-semibold text-white leading-snug line-clamp-2">
+                        <div className="flex flex-col gap-1 p-2 min-w-0">
+                          <div className="text-sm font-semibold text-zinc-100 line-clamp-2">
                             {clip.title || "Untitled clip"}
                           </div>
                           {clip.__repost ? (
-                            <div className="text-xs text-zinc-500 mt-1">
+                            <div className="text-xs text-zinc-500">
                               Originally curated by{" "}
                               {clip.username ? (
-                                <Link href={`/${String(clip.username).trim().toLowerCase()}`} className="font-medium text-zinc-300 hover:underline">
+                                <Link
+                                  href={`/${String(clip.username).trim().toLowerCase()}`}
+                                  className="font-medium text-zinc-300 hover:underline"
+                                >
                                   @{String(clip.username).trim().toLowerCase()}
                                 </Link>
                               ) : (
@@ -903,52 +974,114 @@ export default function PublicProfilePage() {
                               )}
                             </div>
                           ) : null}
-                          <div className="text-sm text-zinc-500 mt-1 truncate">{clip.channelName || clip.channel || "Unknown channel"}</div>
+                          <div className="truncate text-xs text-zinc-400">
+                            {clip.channelName || clip.channel || "Unknown channel"}
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            {clip.createdAt ? formatRelativeTime(clip.createdAt) : ""}
+                          </div>
                           {clip.note ? (
-                            <div className="text-base text-zinc-100 font-medium italic border-l-2 border-emerald-500 pl-3 mt-2 line-clamp-3">
+                            <div className="mt-0.5 line-clamp-2 border-l border-zinc-700 pl-2 text-xs italic text-zinc-500">
                               &ldquo;{clip.note}&rdquo;
                             </div>
                           ) : null}
                         </div>
-
-                        <div className="flex flex-wrap items-center justify-between gap-3 mt-5 pt-4 border-t border-zinc-800/70">
-                          <div className="flex flex-wrap items-center gap-3">
-                            <span className="text-[11px] font-mono font-semibold bg-emerald-500 text-white px-2.5 py-1 rounded-md">
-                              {(primary?.endTime ?? clip.endTime)
-                                ? `${Math.floor(((primary?.startTime ?? clip.startTime) || 0) / 60)}:${String((((primary?.startTime ?? clip.startTime) || 0) % 60)).padStart(2, "0")} — ${Math.floor(((primary?.endTime ?? clip.endTime) || 0) / 60)}:${String((((primary?.endTime ?? clip.endTime) || 0) % 60)).padStart(2, "0")}`
-                                : "Full video"}
-                            </span>
-                            {((primary?.endTime ?? clip.endTime) ?? 0) > 0 ? (
-                              <span className="text-xs text-zinc-500">{formatDuration(primary?.startTime ?? clip.startTime, primary?.endTime ?? clip.endTime)}</span>
-                            ) : null}
-                            {clip.createdAt ? (
-                              <span className="text-xs text-zinc-500">{formatRelativeTime(clip.createdAt)}</span>
-                            ) : null}
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!vid) return;
-                              window.open(
-                                `https://www.youtube.com/watch?v=${vid}&t=${clip.startTime || 0}s`,
-                                "_blank",
-                              );
-                            }}
-                            className="text-xs font-semibold text-emerald-500 hover:text-emerald-400 transition-colors"
-                          >
-                            Watch clip ↗
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
+                      </article>
+                    );
+                  })}
+                </div>
               )}
             </div>
+
+            {profile && (isOwnProfile || collections.length > 0) ? (
+              <section className="mt-10 border-t border-zinc-800/80 pt-8">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="text-lg font-bold text-white">Collections</h2>
+                  {isOwnProfile ? (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setNewCollectionOpen(true)}
+                        className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-xs font-semibold text-emerald-200 transition-colors hover:bg-emerald-500/20"
+                      >
+                        New Collection
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                {collections.length === 0 ? (
+                  <div className="rounded-xl border border-zinc-800/60 bg-zinc-950/40 px-4 py-10 text-center text-sm text-zinc-500">
+                    No collections yet.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {collections.map((col: any) => {
+                      const ids = Array.isArray(col.clipIds) ? col.clipIds : [];
+                      const slug = String(col.slug || "");
+                      const topic = typeof col.topic === "string" ? col.topic.trim() : "";
+                      return (
+                        <div
+                          key={col.id}
+                          className="flex flex-col rounded-xl border border-zinc-800/60 bg-zinc-950 p-4 transition-colors hover:border-zinc-700"
+                        >
+                          <Link
+                            href={`/${profile.username}/collections/${encodeURIComponent(slug)}`}
+                            className="min-w-0 flex-1"
+                          >
+                            <div className="font-semibold text-white line-clamp-2">{col.title || "Untitled"}</div>
+                            <p className="mt-1 text-sm text-zinc-400 line-clamp-2">
+                              {typeof col.description === "string" ? col.description : ""}
+                            </p>
+                            <div className="mt-2 text-xs text-zinc-500">{ids.length} clips</div>
+                            {topic ? (
+                              <span className="mt-2 inline-block rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-300">
+                                {topic}
+                              </span>
+                            ) : null}
+                          </Link>
+                          {isOwnProfile ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setAddClipsCollection({ id: col.id, clipIds: ids, slug })
+                              }
+                              className="mt-3 w-full rounded-lg border border-zinc-700 py-2 text-xs font-semibold text-zinc-300 transition-colors hover:bg-zinc-900"
+                            >
+                              Add clips
+                            </button>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            ) : null}
           </>
         )}
+        </main>
       </div>
+
+      <ClipYoutubeModal clip={selectedClip} onClose={() => setSelectedClip(null)} />
+
+      <NewCollectionModal
+        open={newCollectionOpen}
+        onClose={() => !createCollectionBusy && setNewCollectionOpen(false)}
+        onCreate={handleCreateCollection}
+        busy={createCollectionBusy}
+      />
+      <CollectionAddClipsModal
+        open={addClipsCollection != null}
+        onClose={() => setAddClipsCollection(null)}
+        targetCollection={addClipsCollection}
+        curatorUsername={profile?.username ?? username}
+        currentUser={
+          user
+            ? { uid: user.uid, username: user.username ?? null, photoURL: user.photoURL ?? null }
+            : null
+        }
+        onUpdated={() => {}}
+      />
 
       <SignInCuratorModal
         open={showAuthModal}

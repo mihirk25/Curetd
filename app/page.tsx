@@ -862,6 +862,8 @@ export default function CuratdMVP() {
   const [openCommentsByClipId, setOpenCommentsByClipId] = useState<Record<string, boolean>>({});
   const [commentsByClipId, setCommentsByClipId] = useState<Record<string, any[]>>({});
   const [commentDraftByClipId, setCommentDraftByClipId] = useState<Record<string, string>>({});
+  const [commentSendingByClipId, setCommentSendingByClipId] = useState<Record<string, boolean>>({});
+  const [commentLoadingByClipId, setCommentLoadingByClipId] = useState<Record<string, boolean>>({});
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [sendClipModalOpen, setSendClipModalOpen] = useState(false);
   const [sendClipPayload, setSendClipPayload] = useState<{
@@ -1251,7 +1253,11 @@ export default function CuratdMVP() {
   };
 
   const toggleComments = (clipId: string) => {
+    const opening = !openCommentsByClipId[clipId];
     setOpenCommentsByClipId((prev) => ({ ...prev, [clipId]: !prev[clipId] }));
+    if (opening) {
+      setCommentLoadingByClipId((prev) => ({ ...prev, [clipId]: true }));
+    }
   };
 
   const sendComment = async (clip: any) => {
@@ -1263,6 +1269,27 @@ export default function CuratdMVP() {
     }
     const text = (commentDraftByClipId[clipId] || "").trim();
     if (!text) return;
+
+    // Optimistic comment — appears immediately
+    const optimisticId = `optimistic-${Date.now()}`;
+    setCommentsByClipId((prev) => ({
+      ...prev,
+      [clipId]: [
+        {
+          id: optimisticId,
+          userId: user.uid,
+          username: username ?? null,
+          photoURL: user.photoURL ?? null,
+          text,
+          createdAt: null,
+          _optimistic: true,
+        },
+        ...(prev[clipId] ?? []),
+      ],
+    }));
+    setCommentDraftByClipId((prev) => ({ ...prev, [clipId]: "" }));
+    setCommentSendingByClipId((prev) => ({ ...prev, [clipId]: true }));
+
     try {
       await addDoc(collection(db, "clips", clipId, "comments"), {
         userId: user.uid,
@@ -1272,11 +1299,17 @@ export default function CuratdMVP() {
         text,
         createdAt: serverTimestamp(),
       });
-      setCommentDraftByClipId((prev) => ({ ...prev, [clipId]: "" }));
-      setOpenCommentsByClipId((prev) => ({ ...prev, [clipId]: true }));
     } catch (e) {
       console.error(e);
+      // Roll back optimistic comment and restore draft
+      setCommentsByClipId((prev) => ({
+        ...prev,
+        [clipId]: (prev[clipId] ?? []).filter((c) => c.id !== optimisticId),
+      }));
+      setCommentDraftByClipId((prev) => ({ ...prev, [clipId]: text }));
       alert("Could not post comment.");
+    } finally {
+      setCommentSendingByClipId((prev) => ({ ...prev, [clipId]: false }));
     }
   };
 
@@ -1286,6 +1319,7 @@ export default function CuratdMVP() {
     const isOwner = user.uid === clip.userId;
     const isSelf = !!commentUserId && user.uid === commentUserId;
     if (!isOwner && !isSelf) return;
+    if (!window.confirm("Delete this comment?")) return;
     try {
       await deleteDoc(doc(db, "clips", clipId, "comments", commentId));
     } catch (e) {
@@ -1891,9 +1925,11 @@ export default function CuratdMVP() {
               ...prev,
               [clipId]: snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
             }));
+            setCommentLoadingByClipId((prev) => ({ ...prev, [clipId]: false }));
           },
           () => {
             setCommentsByClipId((prev) => ({ ...prev, [clipId]: [] }));
+            setCommentLoadingByClipId((prev) => ({ ...prev, [clipId]: false }));
           },
         ),
       );
@@ -3045,6 +3081,7 @@ export default function CuratdMVP() {
                               title="Comments"
                             >
                               <span aria-hidden>💬</span>
+                              <span>Comments</span>
                               <span>{commentCountsByClipId[String(clip.id)] ?? 0}</span>
                             </button>
                           </div>
@@ -3055,10 +3092,24 @@ export default function CuratdMVP() {
                           ) : null}
 
                           {openCommentsByClipId[String(clip.id)] ? (
-                            <div className="mt-3 rounded-xl border border-zinc-800 bg-black/20 p-3">
+                            <div className="mt-3 rounded-xl border border-zinc-800 bg-black/20 p-3 border-l-2 border-l-emerald-500/40">
                               <div className="space-y-3">
-                                {(commentsByClipId[String(clip.id)] ?? []).length === 0 ? (
-                                  <div className="text-sm text-zinc-500">No comments yet.</div>
+                                {/* Loading skeleton */}
+                                {commentLoadingByClipId[String(clip.id)] ? (
+                                  <div className="space-y-3 animate-pulse">
+                                    {[0, 1].map((i) => (
+                                      <div key={i} className="flex items-start gap-3">
+                                        <div className="h-8 w-8 rounded-full bg-zinc-800 shrink-0" />
+                                        <div className="flex-1 space-y-2 pt-1">
+                                          <div className="h-2.5 w-24 rounded bg-zinc-800" />
+                                          <div className="h-2.5 w-full rounded bg-zinc-800" />
+                                          <div className="h-2.5 w-3/4 rounded bg-zinc-800" />
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (commentsByClipId[String(clip.id)] ?? []).length === 0 ? (
+                                  <div className="text-sm text-zinc-500">No comments yet. Be the first!</div>
                                 ) : (
                                   <div className="space-y-3">
                                     {(commentsByClipId[String(clip.id)] ?? []).map((c: any) => {
@@ -3069,21 +3120,26 @@ export default function CuratdMVP() {
                                           ? c.username.trim().toLowerCase()
                                           : null;
                                       return (
-                                        <div key={String(c?.id || "")} className="flex items-start gap-3">
+                                        <div
+                                          key={String(c?.id || "")}
+                                          className={`group flex items-start gap-3 transition-opacity ${
+                                            c?._optimistic ? "opacity-60" : "opacity-100"
+                                          }`}
+                                        >
                                           {c?.photoURL ? (
                                             <img
                                               src={c.photoURL}
                                               alt=""
-                                              className="h-8 w-8 rounded-full object-cover border border-zinc-800"
+                                              className="h-8 w-8 rounded-full object-cover border border-zinc-800 shrink-0"
                                             />
                                           ) : (
-                                            <div className="h-8 w-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[11px] font-bold text-zinc-200">
+                                            <div className="h-8 w-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[11px] font-bold text-zinc-200 shrink-0">
                                               {String(c?.username || "U").slice(0, 1).toUpperCase()}
                                             </div>
                                           )}
 
                                           <div className="min-w-0 flex-1">
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2 flex-wrap">
                                               {handle ? (
                                                 <Link
                                                   href={`/${handle}`}
@@ -3095,15 +3151,19 @@ export default function CuratdMVP() {
                                                 <span className="text-xs font-semibold text-zinc-200">User</span>
                                               )}
                                               <span className="text-[11px] text-zinc-500">
-                                                {c?.createdAt ? formatRelativeTime(c.createdAt) : "just now"}
+                                                {c?._optimistic
+                                                  ? "just now"
+                                                  : c?.createdAt
+                                                    ? formatRelativeTime(c.createdAt)
+                                                    : "just now"}
                                               </span>
-                                              {canDelete ? (
+                                              {canDelete && !c?._optimistic ? (
                                                 <button
                                                   type="button"
                                                   onClick={() =>
                                                     void deleteComment(clip, String(c?.id || ""), c?.userId ?? null)
                                                   }
-                                                  className="ml-auto text-[11px] text-zinc-500 hover:text-red-300 hover:underline"
+                                                  className="ml-auto text-[11px] text-zinc-500 hover:text-red-300 hover:underline opacity-0 group-hover:opacity-100 transition-opacity"
                                                 >
                                                   Delete
                                                 </button>
@@ -3119,34 +3179,56 @@ export default function CuratdMVP() {
                                   </div>
                                 )}
 
+                                {/* Composer */}
                                 <div className="pt-2 border-t border-zinc-800">
-                                  <div className="flex items-center gap-2">
-                                    <input
-                                      value={commentDraftByClipId[String(clip.id)] ?? ""}
-                                      onChange={(e) =>
-                                        setCommentDraftByClipId((prev) => ({
-                                          ...prev,
-                                          [String(clip.id)]: e.target.value,
-                                        }))
-                                      }
-                                      onFocus={(e) => {
-                                        if (!user) {
-                                          e.currentTarget.blur();
-                                          setShowAuthModal(true);
-                                        }
-                                      }}
-                                      placeholder="Add a comment..."
-                                      className="flex-1 rounded-lg border border-zinc-800 bg-black/30 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                                    />
+                                  {!user ? (
                                     <button
                                       type="button"
-                                      onClick={() => void sendComment(clip)}
-                                      disabled={!(commentDraftByClipId[String(clip.id)] ?? "").trim()}
-                                      className="shrink-0 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-400 disabled:opacity-50 disabled:hover:bg-emerald-500"
+                                      onClick={() => setShowAuthModal(true)}
+                                      className="w-full rounded-lg border border-zinc-800 bg-black/30 px-3 py-2 text-sm text-zinc-500 hover:text-zinc-300 hover:border-zinc-700 transition-colors text-left"
                                     >
-                                      Send
+                                      Sign in to comment…
                                     </button>
-                                  </div>
+                                  ) : (
+                                    <div className="flex items-end gap-2">
+                                      <textarea
+                                        autoFocus
+                                        rows={1}
+                                        value={commentDraftByClipId[String(clip.id)] ?? ""}
+                                        onChange={(e) =>
+                                          setCommentDraftByClipId((prev) => ({
+                                            ...prev,
+                                            [String(clip.id)]: e.target.value,
+                                          }))
+                                        }
+                                        onInput={(e) => {
+                                          const el = e.currentTarget;
+                                          el.style.height = "auto";
+                                          el.style.height = `${el.scrollHeight}px`;
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter" && !e.shiftKey) {
+                                            e.preventDefault();
+                                            void sendComment(clip);
+                                          }
+                                        }}
+                                        placeholder="Add a comment…"
+                                        style={{ resize: "none", overflow: "hidden" }}
+                                        className="flex-1 rounded-lg border border-zinc-800 bg-black/30 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => void sendComment(clip)}
+                                        disabled={
+                                          !(commentDraftByClipId[String(clip.id)] ?? "").trim() ||
+                                          commentSendingByClipId[String(clip.id)]
+                                        }
+                                        className="shrink-0 rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white hover:bg-emerald-400 disabled:opacity-50 disabled:hover:bg-emerald-500 transition-colors"
+                                      >
+                                        {commentSendingByClipId[String(clip.id)] ? "…" : "Send"}
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
