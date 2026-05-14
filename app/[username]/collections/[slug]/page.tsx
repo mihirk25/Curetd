@@ -148,9 +148,14 @@ export default function CollectionDetailPage() {
   const moveClip = async (index: number, dir: -1 | 1) => {
     if (!collectionData || !isOwner || reorderBusy) return;
     const ids = [...(Array.isArray(collectionData.clipIds) ? collectionData.clipIds : [])];
-    const j = index + dir;
-    if (j < 0 || j >= ids.length) return;
-    [ids[index], ids[j]] = [ids[j], ids[index]];
+    const visibleIds = orderedClips.map((clip) => String(clip?.id || "")).filter(Boolean);
+    const sourceId = visibleIds[index];
+    const targetId = visibleIds[index + dir];
+    if (!sourceId || !targetId) return;
+    const sourceIndex = ids.indexOf(sourceId);
+    const targetIndex = ids.indexOf(targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    [ids[sourceIndex], ids[targetIndex]] = [ids[targetIndex], ids[sourceIndex]];
     setReorderBusy(true);
     try {
       await updateDoc(doc(db, "collections", collectionData.id), {

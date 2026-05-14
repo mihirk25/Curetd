@@ -1,6 +1,23 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function hasParticipant(data) {
+      return signedIn()
+        && data.participants is list
+        && request.auth.uid in data.participants;
+    }
+
+    function isConversationParticipant(conversationId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/conversations/$(conversationId))
+        && get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is list
+        && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+    }
+
     // Unique handles: public read; create/delete when the authenticated user matches { uid }.
     match /usernames/{uname} {
       allow read: if true;
@@ -40,12 +57,29 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    match /collections/{id} {
+      allow read: if true;
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if signedIn()
+        && resource.data.userId == request.auth.uid;
+    }
+
     match /conversations/{id} {
-      allow read, write: if request.auth != null;
+      allow create: if hasParticipant(request.resource.data);
+      allow read, delete: if hasParticipant(resource.data);
+      allow update: if hasParticipant(resource.data)
+        && request.resource.data.participants == resource.data.participants;
     }
 
     match /conversations/{id}/messages/{mid} {
-      allow read, write: if request.auth != null;
+      allow read: if isConversationParticipant(id);
+      allow create: if isConversationParticipant(id)
+        && request.resource.data.senderId == request.auth.uid;
+      allow update, delete: if isConversationParticipant(id);
     }
   }
 }
