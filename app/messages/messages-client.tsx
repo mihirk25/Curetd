@@ -619,8 +619,10 @@ export function MessagesClient() {
     }
     if (!activeConversationId || !activeConversation) return;
 
-    const parts = (activeConversation.data.participants as any) as [string, string] | undefined;
-    if (!Array.isArray(parts) || parts.length < 2) return;
+    const parts = Array.isArray(activeConversation.data.participants)
+      ? activeConversation.data.participants.map((p: unknown) => String(p)).filter(Boolean)
+      : [];
+    if (parts.length < 2) return;
 
     setSending(true);
     try {
@@ -651,6 +653,7 @@ export function MessagesClient() {
         await sendMessageViaFirestoreUtil(activeConversationId, user.uid, { type: "text", text: draft });
       } catch (e) {
         // Fallback to legacy helper (kept for safety)
+        if (parts.length !== 2) throw e;
         await sendMessage({
           db,
           conversationId: activeConversationId,
