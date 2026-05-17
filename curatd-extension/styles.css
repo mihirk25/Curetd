@@ -85,35 +85,99 @@
   overflow: hidden;
 }
 
-.curatd-label {
-  display: block;
-  margin-bottom: 4px;
+/* Dual range slider */
+.curatd-range-host {
+  margin-bottom: 12px;
+}
+
+.curatd-range {
+  width: 100%;
+}
+
+.curatd-range-track {
+  position: relative;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.curatd-range-track-bg {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 9999px;
+  background: #333333;
+}
+
+.curatd-range-track-fill {
+  position: absolute;
+  top: 50%;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 9999px;
+  background: #22c55e;
+  pointer-events: none;
+}
+
+.curatd-range-handle {
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  padding: 0;
+  border: 2px solid #000000;
+  border-radius: 50%;
+  background: #22c55e;
+  cursor: grab;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.35);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  z-index: 2;
+}
+
+.curatd-range-handle:hover {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.5);
+}
+
+.curatd-range-handle:active {
+  cursor: grabbing;
+  transform: scale(1.12);
+}
+
+.curatd-range-labels {
+  position: relative;
+  width: 100%;
+  height: 16px;
+  margin-top: 8px;
+  margin-bottom: 6px;
+  pointer-events: none;
+}
+
+.curatd-range-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
   font-size: 11px;
   font-weight: 600;
-  color: #a1a1aa;
+  color: #ffffff;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-.curatd-input {
-  width: 100%;
-  margin-bottom: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid #3f3f46;
-  background: #09090b;
-  color: #fafafa;
-  font-size: 13px;
-  outline: none;
-}
-
-.curatd-input:focus {
-  border-color: #22c55e;
-  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
-}
-
-.curatd-hint {
+.curatd-clip-summary {
   margin: 0 0 12px;
-  font-size: 11px;
-  color: #52525b;
+  font-size: 12px;
+  font-weight: 500;
+  color: #a1a1aa;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
 }
 
 .curatd-actions {

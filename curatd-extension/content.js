@@ -2,6 +2,7 @@
   const ROOT_ID = "curatd-clipper-root";
   const BTN_ID = "curatd-save-btn";
   const PANEL_ID = "curatd-save-panel";
+  const MIN_CLIP_SECONDS = 1;
 
   let injected = false;
   let observer = null;
@@ -38,22 +39,31 @@
     return el?.textContent?.trim() || "YouTube";
   }
 
-  function parseTimeInput(value) {
-    const raw = String(value || "").trim();
-    if (raw === "") return null;
-    if (/^\d+(\.\d+)?$/.test(raw)) return Math.floor(Number(raw));
-    const parts = raw.split(":").map((p) => Number(p));
-    if (parts.some((n) => Number.isNaN(n))) return null;
-    if (parts.length === 2) return parts[0] * 60 + parts[1];
-    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    return null;
+  /** @param {number} sec */
+  function formatHMS(sec) {
+    const s = Math.max(0, Math.floor(sec));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const ss = s % 60;
+    return `${h}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
   }
 
-  function formatSeconds(sec) {
+  /** @param {number} sec */
+  function formatClipLength(sec) {
     const s = Math.max(0, Math.floor(sec));
+    if (s >= 3600) {
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const r = s % 60;
+      if (r > 0) return `${h}h ${m}m ${r}s`;
+      if (m > 0) return `${h}h ${m}m`;
+      return `${h}h`;
+    }
     const m = Math.floor(s / 60);
     const r = s % 60;
-    return `${m}:${String(r).padStart(2, "0")}`;
+    if (m > 0 && r > 0) return `${m}m ${r}s`;
+    if (m > 0) return `${m}m`;
+    return `${r}s`;
   }
 
   function findTitleAnchor() {
@@ -68,12 +78,149 @@
     document.getElementById(PANEL_ID)?.remove();
   }
 
+  /**
+   * @param {HTMLElement} container
+   * @param {{ duration: number, start: number, end: number }} opts
+   * @returns {{ getStart: () => number, getEnd: () => number, destroy: () => void }}
+   */
+  function createDualRangeSlider(container, opts) {
+    const duration = Math.max(MIN_CLIP_SECONDS, opts.duration);
+    let start = Math.max(0, Math.min(opts.start, duration - MIN_CLIP_SECONDS));
+    let end = Math.max(start + MIN_CLIP_SECONDS, Math.min(opts.end, duration));
+
+    const root = document.createElement("div");
+    root.className = "curatd-range";
+    root.innerHTML = `
+      <div class="curatd-range-track" id="curatd-range-track">
+        <div class="curatd-range-track-bg"></div>
+        <div class="curatd-range-track-fill"></div>
+        <button type="button" class="curatd-range-handle curatd-range-handle-start" aria-label="Clip start time"></button>
+        <button type="button" class="curatd-range-handle curatd-range-handle-end" aria-label="Clip end time"></button>
+      </div>
+      <div class="curatd-range-labels">
+        <span class="curatd-range-label curatd-range-label-start"></span>
+        <span class="curatd-range-label curatd-range-label-end"></span>
+      </div>
+      <p class="curatd-clip-summary"></p>
+    `;
+
+    container.appendChild(root);
+
+    const track = root.querySelector("#curatd-range-track");
+    const fill = root.querySelector(".curatd-range-track-fill");
+    const handleStart = root.querySelector(".curatd-range-handle-start");
+    const handleEnd = root.querySelector(".curatd-range-handle-end");
+    const labelStart = root.querySelector(".curatd-range-label-start");
+    const labelEnd = root.querySelector(".curatd-range-label-end");
+    const summary = root.querySelector(".curatd-clip-summary");
+
+    function pct(time) {
+      return duration > 0 ? (time / duration) * 100 : 0;
+    }
+
+    function timeFromClientX(clientX) {
+      const rect = track.getBoundingClientRect();
+      const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+      const ratio = rect.width > 0 ? x / rect.width : 0;
+      return Math.round(ratio * duration);
+    }
+
+    function render() {
+      const startPct = pct(start);
+      const endPct = pct(end);
+
+      handleStart.style.left = `${startPct}%`;
+      handleEnd.style.left = `${endPct}%`;
+      fill.style.left = `${startPct}%`;
+      fill.style.width = `${Math.max(0, endPct - startPct)}%`;
+
+      labelStart.textContent = formatHMS(start);
+      labelEnd.textContent = formatHMS(end);
+      labelStart.style.left = `${startPct}%`;
+      labelEnd.style.left = `${endPct}%`;
+
+      const len = Math.max(0, end - start);
+      summary.textContent = `Clip: ${formatHMS(start)} → ${formatHMS(end)} (${formatClipLength(len)})`;
+    }
+
+    let activeHandle = null;
+
+    function onPointerMove(e) {
+      if (!activeHandle) return;
+      const t = timeFromClientX(e.clientX);
+
+      if (activeHandle === "start") {
+        start = Math.max(0, Math.min(t, end - MIN_CLIP_SECONDS));
+      } else {
+        end = Math.min(duration, Math.max(t, start + MIN_CLIP_SECONDS));
+      }
+      render();
+    }
+
+    function onPointerUp() {
+      activeHandle = null;
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      document.removeEventListener("pointercancel", onPointerUp);
+      handleStart.releasePointerCapture?.();
+      handleEnd.releasePointerCapture?.();
+    }
+
+    function bindHandle(handleEl, which) {
+      handleEl.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        activeHandle = which;
+        handleEl.setPointerCapture?.(e.pointerId);
+        document.addEventListener("pointermove", onPointerMove);
+        document.addEventListener("pointerup", onPointerUp);
+        document.addEventListener("pointercancel", onPointerUp);
+      });
+    }
+
+    bindHandle(handleStart, "start");
+    bindHandle(handleEnd, "end");
+
+    track.addEventListener("pointerdown", (e) => {
+      if (e.target === handleStart || e.target === handleEnd) return;
+      const t = timeFromClientX(e.clientX);
+      const distStart = Math.abs(t - start);
+      const distEnd = Math.abs(t - end);
+      if (distStart <= distEnd) {
+        start = Math.max(0, Math.min(t, end - MIN_CLIP_SECONDS));
+        activeHandle = "start";
+      } else {
+        end = Math.min(duration, Math.max(t, start + MIN_CLIP_SECONDS));
+        activeHandle = "end";
+      }
+      render();
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("pointerup", onPointerUp);
+      document.addEventListener("pointercancel", onPointerUp);
+    });
+
+    render();
+
+    return {
+      getStart: () => start,
+      getEnd: () => end,
+      destroy: () => root.remove(),
+    };
+  }
+
   function showPanel(anchor) {
     removePanel();
     const video = getVideoElement();
-    const duration = video?.duration && Number.isFinite(video.duration) ? video.duration : 3600;
-    const startDefault = video ? Math.floor(video.currentTime) : 0;
-    const endDefault = Math.min(Math.floor(startDefault + 60), Math.floor(duration));
+    const duration =
+      video?.duration && Number.isFinite(video.duration) && video.duration > 0
+        ? video.duration
+        : 3600;
+    const current = video?.currentTime && Number.isFinite(video.currentTime) ? video.currentTime : 0;
+
+    let startDefault = Math.floor(current);
+    let endDefault = Math.min(Math.floor(current + 60), Math.floor(duration));
+    if (endDefault <= startDefault) {
+      endDefault = Math.min(startDefault + MIN_CLIP_SECONDS, Math.floor(duration));
+    }
 
     const panel = document.createElement("div");
     panel.id = PANEL_ID;
@@ -84,11 +231,7 @@
         <button type="button" class="curatd-panel-close" aria-label="Close">&times;</button>
       </div>
       <p class="curatd-panel-title"></p>
-      <label class="curatd-label">Start (seconds or m:ss)</label>
-      <input type="text" class="curatd-input" id="curatd-start" value="${startDefault}" />
-      <label class="curatd-label">End (seconds or m:ss)</label>
-      <input type="text" class="curatd-input" id="curatd-end" value="${endDefault}" />
-      <p class="curatd-hint">Max duration: ${formatSeconds(duration)}</p>
+      <div class="curatd-range-host"></div>
       <p class="curatd-status" id="curatd-status" hidden></p>
       <div class="curatd-actions">
         <button type="button" class="curatd-btn curatd-btn-primary" id="curatd-save">Save Clip</button>
@@ -98,8 +241,21 @@
 
     panel.querySelector(".curatd-panel-title").textContent = getVideoTitle();
 
-    panel.querySelector(".curatd-panel-close").addEventListener("click", removePanel);
-    panel.querySelector("#curatd-cancel").addEventListener("click", removePanel);
+    const rangeHost = panel.querySelector(".curatd-range-host");
+    const slider = createDualRangeSlider(rangeHost, {
+      duration,
+      start: startDefault,
+      end: endDefault,
+    });
+
+    panel.querySelector(".curatd-panel-close").addEventListener("click", () => {
+      slider.destroy();
+      removePanel();
+    });
+    panel.querySelector("#curatd-cancel").addEventListener("click", () => {
+      slider.destroy();
+      removePanel();
+    });
 
     const statusEl = panel.querySelector("#curatd-status");
     const saveBtn = panel.querySelector("#curatd-save");
@@ -113,28 +269,14 @@
         return;
       }
 
-      const startParsed = parseTimeInput(panel.querySelector("#curatd-start").value);
-      const endParsed = parseTimeInput(panel.querySelector("#curatd-end").value);
+      const startTime = slider.getStart();
+      const endTime = slider.getEnd();
 
-      if (startParsed == null || endParsed == null) {
-        statusEl.hidden = false;
-        statusEl.className = "curatd-status curatd-status-error";
-        statusEl.textContent = "Enter valid start and end times.";
-        return;
-      }
-
-      let startTime = startParsed;
-      let endTime = endParsed;
       if (endTime <= startTime) {
         statusEl.hidden = false;
         statusEl.className = "curatd-status curatd-status-error";
         statusEl.textContent = "End time must be after start time.";
         return;
-      }
-
-      if (duration > 0) {
-        startTime = Math.min(startTime, Math.floor(duration));
-        endTime = Math.min(endTime, Math.floor(duration));
       }
 
       statusEl.hidden = false;
@@ -162,7 +304,10 @@
         statusEl.textContent = response.merged
           ? "Moment added to your existing clip!"
           : "Clip saved to Curatd!";
-        setTimeout(removePanel, 1400);
+        setTimeout(() => {
+          slider.destroy();
+          removePanel();
+        }, 1400);
       } catch (err) {
         statusEl.className = "curatd-status curatd-status-error";
         statusEl.textContent =
