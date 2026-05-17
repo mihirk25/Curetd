@@ -25,6 +25,7 @@ import { auth, db, storage } from "../../firebase";
 import { useAuth } from "../auth-context";
 import { UsernameSetup } from "../username-setup";
 import { EditUsernameModal } from "../edit-username-control";
+import { SettingsModal } from "../components/settings-modal";
 import { CuratorSearchBar } from "../curator-search-bar";
 import { SignInCuratorModal } from "../sign-in-curator-modal";
 import { CuratorRequiredModal } from "../curator-required-modal";
@@ -120,6 +121,7 @@ export default function PublicProfilePage() {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
   const [navMenuOpen, setNavMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [editUsernameOpen, setEditUsernameOpen] = useState(false);
   const navMenuRef = useRef<HTMLDivElement | null>(null);
   const navPhotoInputRef = useRef<HTMLInputElement | null>(null);
@@ -437,6 +439,7 @@ export default function PublicProfilePage() {
         }
         setNavPhotoUrl(url);
         setNavMenuOpen(false);
+        setSettingsOpen(false);
       } catch (e) {
         console.error(e);
         alert("Could not upload photo. Please try again.");
@@ -487,11 +490,22 @@ export default function PublicProfilePage() {
     <div className="min-h-screen bg-black text-white font-sans flex flex-col">
       <UsernameSetup />
       {user ? (
-        <EditUsernameModal
-          open={editUsernameOpen}
-          onOpenChange={setEditUsernameOpen}
-          currentUsername={myUsername ?? ""}
-        />
+        <>
+          <EditUsernameModal
+            open={editUsernameOpen}
+            onOpenChange={setEditUsernameOpen}
+            currentUsername={myUsername ?? ""}
+          />
+          <SettingsModal
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            profileHref={myUsername ? `/${myUsername}` : "/"}
+            uploadingPhoto={navUploadingPhoto}
+            onChangePhoto={() => navPhotoInputRef.current?.click()}
+            onEditUsername={() => setEditUsernameOpen(true)}
+            onSignOut={() => void handleSignOut()}
+          />
+        </>
       ) : null}
       <header className="shrink-0 h-14 border-b border-zinc-800 grid grid-cols-[minmax(0,auto)_1fr_minmax(0,auto)] items-center gap-4 px-4 bg-black">
         <Link href="/" className="text-sm font-bold tracking-tight text-white hover:text-zinc-200 transition-colors shrink-0">
@@ -567,41 +581,16 @@ export default function PublicProfilePage() {
 
               {navMenuOpen ? (
                 <div className="absolute right-4 top-14 z-[80] w-56 rounded-lg border border-zinc-700 bg-zinc-900 shadow-lg p-1">
-                  <Link
-                    href={myUsername ? `/${myUsername}` : "/"}
-                    onClick={() => setNavMenuOpen(false)}
-                    className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70"
-                  >
-                    <span className="text-zinc-400" aria-hidden>👤</span>
-                    My Profile
-                  </Link>
-                  <button
-                    type="button"
-                    disabled={navUploadingPhoto}
-                    onClick={() => navPhotoInputRef.current?.click()}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <span className="text-zinc-400" aria-hidden>📷</span>
-                    {navUploadingPhoto ? "Uploading..." : "Change Photo"}
-                  </button>
                   <button
                     type="button"
                     onClick={() => {
-                      setEditUsernameOpen(true);
+                      setSettingsOpen(true);
                       setNavMenuOpen(false);
                     }}
                     className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70"
                   >
-                    <span className="text-zinc-400" aria-hidden>@</span>
-                    Edit username
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleSignOut()}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-red-300 hover:bg-zinc-800/70"
-                  >
-                    <span className="text-red-300/80" aria-hidden>⏻</span>
-                    Sign out
+                    <span className="text-zinc-400" aria-hidden>⚙</span>
+                    Settings
                   </button>
                 </div>
               ) : null}

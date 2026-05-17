@@ -1,9 +1,14 @@
 import {
+  collection,
   doc,
   getDoc,
+  getDocs,
+  limit,
+  query,
   runTransaction,
   serverTimestamp,
   setDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 
@@ -21,6 +26,30 @@ export function profileNeedsLegalName(data: {
 }
 
 /** Internal-only profile fields — never shown in public UI. */
+export function profileHasAddedClip(data: { hasAddedClip?: unknown } | null | undefined): boolean {
+  return data?.hasAddedClip === true;
+}
+
+export async function markUserHasAddedClip(uid: string): Promise<void> {
+  await setDoc(doc(db, "users", uid), { hasAddedClip: true }, { merge: true });
+}
+
+/** True when the user has never saved a clip and should see the extension install prompt. */
+export async function shouldPromptExtensionInstall(uid: string): Promise<boolean> {
+  const userSnap = await getDoc(doc(db, "users", uid));
+  if (profileHasAddedClip(userSnap.exists() ? (userSnap.data() as { hasAddedClip?: unknown }) : null)) {
+    return false;
+  }
+  const clipsSnap = await getDocs(
+    query(collection(db, "clips"), where("userId", "==", uid), limit(1)),
+  );
+  if (!clipsSnap.empty) {
+    await markUserHasAddedClip(uid);
+    return false;
+  }
+  return true;
+}
+
 export async function saveUserLegalName(
   uid: string,
   params: { firstName: string; lastName: string },

@@ -15,12 +15,16 @@ import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { useUnreadMessageCount } from "./messages/use-unread-count";
 import { CURATD_TOPICS } from "./lib/topics";
 import { SendClipModal } from "./components/SendClipModal";
+import { SettingsModal } from "./components/settings-modal";
+import { ExtensionInstallPromptModal } from "./components/extension-install-prompt-modal";
 import {
   followUser,
   getFollowerCount,
   isFollowing,
   unfollowUser,
 } from "./lib/firestore";
+import { markUserHasAddedClip, shouldPromptExtensionInstall } from "../src/lib/firestore";
+import { supportsChromeExtensionBrowser } from "./lib/browser";
 import {
   adjustTopicUsage,
   ensureSeedTopics,
@@ -844,6 +848,8 @@ export default function CuratdMVP() {
   const clipOwnerMenuRef = useRef<HTMLDivElement | null>(null);
   const [toastMessage, setToastMessage] = useState("");
   const [navMenuOpen, setNavMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [extensionPromptOpen, setExtensionPromptOpen] = useState(false);
   const [editUsernameOpen, setEditUsernameOpen] = useState(false);
   const navMenuRef = useRef<HTMLDivElement | null>(null);
   const navPhotoInputRef = useRef<HTMLInputElement | null>(null);
@@ -1144,7 +1150,7 @@ export default function CuratdMVP() {
       if (!pendingAddClipAfterAuth.current) return;
       pendingAddClipAfterAuth.current = false;
       setShowAuthModal(false);
-      openNewClipForm();
+      void requestOpenNewClipForm();
       return;
     }
     if (hadAuthenticatedUser.current) {
@@ -1431,6 +1437,7 @@ export default function CuratdMVP() {
       }
       setNavPhotoUrl(url);
       setNavMenuOpen(false);
+      setSettingsOpen(false);
     } catch (e) {
       console.error(e);
       alert("Could not upload photo. Please try again.");
@@ -1472,7 +1479,7 @@ export default function CuratdMVP() {
     setShowForm(false);
   };
 
-  const openNewClipForm = () => {
+  const proceedOpenNewClipForm = () => {
     if (!user) {
       setShowAuthModal(true);
       return;
@@ -1492,6 +1499,26 @@ export default function CuratdMVP() {
     setAudioOnly(false);
     setEditingClipId(null);
     setShowForm(true);
+  };
+
+  const requestOpenNewClipForm = async () => {
+    if (!user) {
+      pendingAddClipAfterAuth.current = true;
+      setShowAuthModal(true);
+      return;
+    }
+    if (supportsChromeExtensionBrowser()) {
+      try {
+        const showPrompt = await shouldPromptExtensionInstall(user.uid);
+        if (showPrompt) {
+          setExtensionPromptOpen(true);
+          return;
+        }
+      } catch {
+        // offline or rules — still allow adding via the form
+      }
+    }
+    proceedOpenNewClipForm();
   };
 
   const newMomentId = () => {
@@ -1610,6 +1637,9 @@ export default function CuratdMVP() {
           });
         }
         await recordTopicUsage(normalizedTopic, user.uid);
+        if (isFirstClipEver) {
+          await markUserHasAddedClip(user.uid);
+        }
       }
       const userSnap = await getDoc(doc(db, "users", user.uid));
       const userData = userSnap.exists()
@@ -2148,11 +2178,29 @@ export default function CuratdMVP() {
     <div className="h-screen bg-black text-white font-sans flex flex-col">
       <UsernameSetup />
       {user ? (
-        <EditUsernameModal
-          open={editUsernameOpen}
-          onOpenChange={setEditUsernameOpen}
-          currentUsername={username ?? ""}
-        />
+        <>
+          <EditUsernameModal
+            open={editUsernameOpen}
+            onOpenChange={setEditUsernameOpen}
+            currentUsername={username ?? ""}
+          />
+          <SettingsModal
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            profileHref={username ? `/${username}` : "/"}
+            uploadingPhoto={navUploadingPhoto}
+            onChangePhoto={() => navPhotoInputRef.current?.click()}
+            onEditUsername={() => setEditUsernameOpen(true)}
+            onSignOut={() => void handleSignOut()}
+          />
+          <ExtensionInstallPromptModal
+            open={extensionPromptOpen}
+            onSkip={() => {
+              setExtensionPromptOpen(false);
+              proceedOpenNewClipForm();
+            }}
+          />
+        </>
       ) : null}
       {onboardingStep != null && !user ? (
         <div className="fixed inset-0 z-[220] bg-black text-white">
@@ -2385,7 +2433,7 @@ export default function CuratdMVP() {
                     setShowAuthModal(true);
                     return;
                   }
-                  void openNewClipForm();
+                  void requestOpenNewClipForm();
                 }}
                 className="shrink-0 rounded-xl bg-emerald-500 px-3.5 py-2 text-sm font-semibold text-black hover:bg-emerald-400 transition-colors"
                 aria-label="Add clip"
@@ -2427,41 +2475,16 @@ export default function CuratdMVP() {
 
               {navMenuOpen ? (
                 <div className="absolute right-4 top-14 z-[80] w-56 rounded-lg border border-zinc-700 bg-zinc-900 shadow-lg p-1">
-                  <Link
-                    href={username ? `/${username}` : "/"}
-                    onClick={() => setNavMenuOpen(false)}
-                    className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70"
-                  >
-                    <span className="text-zinc-400" aria-hidden>👤</span>
-                    My Profile
-                  </Link>
-                  <button
-                    type="button"
-                    disabled={navUploadingPhoto}
-                    onClick={() => navPhotoInputRef.current?.click()}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <span className="text-zinc-400" aria-hidden>📷</span>
-                    {navUploadingPhoto ? "Uploading..." : "Change Photo"}
-                  </button>
                   <button
                     type="button"
                     onClick={() => {
-                      setEditUsernameOpen(true);
+                      setSettingsOpen(true);
                       setNavMenuOpen(false);
                     }}
                     className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70"
                   >
-                    <span className="text-zinc-400" aria-hidden>@</span>
-                    Edit username
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleSignOut()}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-red-300 hover:bg-zinc-800/70"
-                  >
-                    <span className="text-red-300/80" aria-hidden>⏻</span>
-                    Sign out
+                    <span className="text-zinc-400" aria-hidden>⚙</span>
+                    Settings
                   </button>
                 </div>
               ) : null}
