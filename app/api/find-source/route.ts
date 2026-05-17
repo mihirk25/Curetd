@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { getAdminDb } from "../../../src/lib/firebaseAdmin";
+import { getAdminDb } from "@/lib/firebase-admin";
 
 type FindSourceResponse = {
   transcript: string;

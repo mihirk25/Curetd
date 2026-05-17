@@ -1,4 +1,4 @@
-import { getAdminDb } from "../../src/lib/firebaseAdmin";
+import { getAdminDb, isAdminConfigured } from "@/lib/firebase-admin";
 import { extractVideoId } from "./clip-playback";
 
 export type ClipForMetadata = {
@@ -29,10 +29,25 @@ function primaryNote(clip: ClipForMetadata) {
 
 export async function getClipForMetadata(id: string): Promise<ClipForMetadata | null> {
   if (!id) return null;
+
+  if (!isAdminConfigured()) {
+    if (process.env.NODE_ENV === "development") {
+      console.error(
+        "[getClipForMetadata] Firebase Admin env vars missing (FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY).",
+      );
+    }
+    return null;
+  }
+
   try {
     const adminDb = getAdminDb();
     const snap = await adminDb.collection("clips").doc(id).get();
-    if (!snap.exists) return null;
+    if (!snap.exists) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn(`[getClipForMetadata] No document at clips/${id}`);
+      }
+      return null;
+    }
 
     const data = snap.data() || {};
     let username = normalizeUsername(data.username);
@@ -43,20 +58,25 @@ export async function getClipForMetadata(id: string): Promise<ClipForMetadata | 
         if (userSnap.exists) {
           username = normalizeUsername(userSnap.data()?.username);
         }
-      } catch {
-        // optional username lookup
+      } catch (userErr) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[getClipForMetadata] Username lookup failed:", userErr);
+        }
       }
     }
 
     return { id: snap.id, ...data, username } as ClipForMetadata;
-  } catch {
+  } catch (err) {
+    if (process.env.NODE_ENV === "development") {
+      console.error(`[getClipForMetadata] Failed to read clips/${id}:`, err);
+    }
     return null;
   }
 }
 
 export function buildClipShareMetadata(clip: ClipForMetadata) {
   const videoId =
-    (typeof clip.videoId === "string" && clip.videoId) ||
+    (typeof clip.videoId === "string" && clip.videoId.trim()) ||
     extractVideoId(clip.videoUrl || clip.url || "") ||
     null;
 
@@ -64,14 +84,13 @@ export function buildClipShareMetadata(clip: ClipForMetadata) {
   const title =
     (typeof clip.title === "string" && clip.title.trim()) ||
     note ||
-    "Curatd clip";
+    "Curatd";
 
   const handle = clip.username || "unknown";
   const description = `Curated by @${handle} on Curatd`;
-  const url = `https://curatd.live/clip/${clip.id}`;
   const image = videoId
     ? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`
     : undefined;
 
-  return { title, description, url, image, videoId };
+  return { title, description, image, videoId };
 }
