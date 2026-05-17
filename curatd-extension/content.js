@@ -418,6 +418,7 @@
     }
 
     let activeHandle = null;
+    let capturedPointerId = null;
 
     function onPointerMove(e) {
       if (!activeHandle) return;
@@ -432,19 +433,24 @@
     }
 
     function onPointerUp() {
+      const pointerId = capturedPointerId;
       activeHandle = null;
+      capturedPointerId = null;
       document.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("pointerup", onPointerUp);
       document.removeEventListener("pointercancel", onPointerUp);
-      handleStart.releasePointerCapture?.();
-      handleEnd.releasePointerCapture?.();
+      if (pointerId != null) {
+        handleStart.releasePointerCapture?.(pointerId);
+        handleEnd.releasePointerCapture?.(pointerId);
+      }
     }
 
     function bindHandle(handleEl, which) {
       handleEl.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         activeHandle = which;
-        handleEl.setPointerCapture?.(e.pointerId);
+        capturedPointerId = e.pointerId;
+        handleEl.setPointerCapture(e.pointerId);
         document.addEventListener("pointermove", onPointerMove);
         document.addEventListener("pointerup", onPointerUp);
         document.addEventListener("pointercancel", onPointerUp);
@@ -459,14 +465,19 @@
       const t = timeFromClientX(e.clientX);
       const distStart = Math.abs(t - start);
       const distEnd = Math.abs(t - end);
+      let handleEl;
       if (distStart <= distEnd) {
         start = Math.max(0, Math.min(t, end - MIN_CLIP_SECONDS));
         activeHandle = "start";
+        handleEl = handleStart;
       } else {
         end = Math.min(duration, Math.max(t, start + MIN_CLIP_SECONDS));
         activeHandle = "end";
+        handleEl = handleEnd;
       }
       render();
+      capturedPointerId = e.pointerId;
+      handleEl.setPointerCapture(e.pointerId);
       document.addEventListener("pointermove", onPointerMove);
       document.addEventListener("pointerup", onPointerUp);
       document.addEventListener("pointercancel", onPointerUp);
