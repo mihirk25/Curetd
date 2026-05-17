@@ -1,0 +1,170 @@
+#curatd-clipper-root {
+  margin: 8px 0 4px;
+}
+
+.curatd-save-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  background: #000000;
+  color: #22c55e;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.curatd-save-trigger:hover {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: #22c55e;
+  color: #4ade80;
+}
+
+.curatd-save-trigger::before {
+  content: "▶";
+  font-size: 10px;
+  color: #22c55e;
+}
+
+.curatd-panel {
+  position: relative;
+  z-index: 9999;
+  margin-top: 12px;
+  max-width: 360px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid #27272a;
+  background: #000000;
+  color: #e4e4e7;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+
+.curatd-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.curatd-panel-brand {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #22c55e;
+}
+
+.curatd-panel-close {
+  border: none;
+  background: transparent;
+  color: #71717a;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.curatd-panel-close:hover {
+  color: #ffffff;
+}
+
+.curatd-panel-title {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fafafa;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.curatd-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #a1a1aa;
+}
+
+.curatd-input {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #3f3f46;
+  background: #09090b;
+  color: #fafafa;
+  font-size: 13px;
+  outline: none;
+}
+
+.curatd-input:focus {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
+}
+
+.curatd-hint {
+  margin: 0 0 12px;
+  font-size: 11px;
+  color: #52525b;
+}
+
+.curatd-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.curatd-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+}
+
+.curatd-btn-primary {
+  background: #22c55e;
+  color: #000000;
+}
+
+.curatd-btn-primary:hover:not(:disabled) {
+  background: #4ade80;
+}
+
+.curatd-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.curatd-btn-ghost {
+  background: transparent;
+  color: #a1a1aa;
+  border: 1px solid #3f3f46;
+}
+
+.curatd-btn-ghost:hover {
+  color: #ffffff;
+  border-color: #52525b;
+}
+
+.curatd-status {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
+.curatd-status-error {
+  color: #f87171;
+}
+
+.curatd-status-success {
+  color: #4ade80;
+}
