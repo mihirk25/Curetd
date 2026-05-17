@@ -33,7 +33,7 @@ Chrome extension to save YouTube clips directly to your Curatd Firestore account
 ## How auth sync works
 
 1. You visit **curatd.live** while signed in.
-2. `curatd-bridge.js` reads `firebase:authUser:…` from `localStorage` and sends it to the background worker.
+2. `curatd-bridge.js` reads `firebase:authUser:…` from IndexedDB (`firebaseLocalStorageDb` / `firebaseLocalStorage`) and sends it to the background worker.
 3. The background stores the session in `chrome.storage.local`.
 4. The popup and clip saves use that stored session.
 
