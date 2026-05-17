@@ -22,9 +22,8 @@ import { followUser, getFollowerCount, unfollowUser } from "../lib/firestore";
 import {
   extractVideoId,
   formatTimestamp,
-  onYoutubeThumbnailError,
   toSeconds,
-  youtubeThumbnailUrl,
+  youtubeThumbnailImgProps,
 } from "../lib/clip-playback";
 import { ClipYoutubeModal } from "../components/clip-youtube-modal";
 
@@ -478,10 +477,9 @@ function ExploreClipCard({
       >
         {vid ? (
           <img
-            src={youtubeThumbnailUrl(vid, "max")}
             alt=""
             className="h-full w-full object-cover"
-            onError={(e) => onYoutubeThumbnailError(e, vid)}
+            {...youtubeThumbnailImgProps(vid)}
           />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">

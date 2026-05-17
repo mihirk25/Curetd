@@ -32,6 +32,8 @@ import {
 } from "./lib/topic-directory";
 import {
   onYoutubeThumbnailError,
+  onYoutubeThumbnailLoad,
+  youtubeThumbnailImgProps,
   youtubeThumbnailUrl,
 } from "./lib/clip-playback";
 
@@ -304,10 +306,9 @@ function FeedVideoPlayer({
           ) : (
             <>
               <img
-                src={youtubeThumbnailUrl(videoId, "max")}
                 alt="Video thumbnail"
                 className="absolute inset-0 w-full h-full object-cover"
-                onError={(e) => onYoutubeThumbnailError(e, videoId)}
+                {...youtubeThumbnailImgProps(videoId)}
               />
               <div className="absolute inset-0 bg-black/10 group-hover:bg-black/30 transition-colors" />
               <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -522,6 +523,7 @@ function AudioOnlyPlayerCard({
           alt={shouldPlay ? "Playing audio clip" : "Audio clip cover"}
           className="absolute inset-0 h-full w-full object-cover"
           onError={(e) => onYoutubeThumbnailError(e, videoId)}
+          onLoad={(e) => onYoutubeThumbnailLoad(e, videoId)}
         />
         <div className="absolute inset-0 bg-black/55" />
 
@@ -2865,6 +2867,7 @@ export default function CuratdMVP() {
                             alt={clip.title || "Audio cover"}
                             className="absolute inset-0 w-full h-full object-cover scale-110 blur-lg opacity-45"
                             onError={(e) => onYoutubeThumbnailError(e, vid)}
+                            onLoad={(e) => onYoutubeThumbnailLoad(e, vid)}
                           />
                         ) : null}
                         <div className="absolute inset-0 bg-black/65" />
