@@ -215,6 +215,13 @@ export default function SettingsPage() {
                   </span>
                 </a>
               ) : null}
+
+              <SettingsRowLink href="/privacy">
+                <span className="text-zinc-400" aria-hidden>
+                  🔒
+                </span>
+                Privacy Policy
+              </SettingsRowLink>
             </nav>
 
             <button
