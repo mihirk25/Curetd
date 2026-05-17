@@ -12,8 +12,9 @@ type ClipPageProps = {
   params: Promise<{ id: string }>;
 };
 
-/** Always resolve OG tags at request time (needs live Admin credentials). */
+/** Always resolve OG tags at request time with live Firestore data. */
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export async function generateMetadata({ params }: ClipPageProps) {
   const { id } = await params;

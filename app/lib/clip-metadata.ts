@@ -1,3 +1,5 @@
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/firebase";
 import { getAdminDb, isAdminConfigured } from "@/lib/firebase-admin";
 import { extractVideoId } from "./clip-playback";
 
@@ -27,48 +29,72 @@ function primaryNote(clip: ClipForMetadata) {
   return null;
 }
 
+async function resolveUsername(
+  data: Record<string, unknown>,
+  fetchUser: (userId: string) => Promise<string | null>,
+): Promise<string | null> {
+  let username = normalizeUsername(data.username);
+  if (username || typeof data.userId !== "string" || !data.userId) {
+    return username;
+  }
+  try {
+    return await fetchUser(data.userId);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchClipViaAdmin(id: string): Promise<ClipForMetadata | null> {
+  const adminDb = getAdminDb();
+  const snap = await adminDb.collection("clips").doc(id).get();
+  if (!snap.exists) return null;
+
+  const data = snap.data() || {};
+  const username = await resolveUsername(data, async (userId) => {
+    const userSnap = await adminDb.collection("users").doc(userId).get();
+    return userSnap.exists ? normalizeUsername(userSnap.data()?.username) : null;
+  });
+
+  return { id: snap.id, ...data, username } as ClipForMetadata;
+}
+
+/** Public read — works when Admin env vars are missing (e.g. Vercel). */
+async function fetchClipViaClientSdk(id: string): Promise<ClipForMetadata | null> {
+  const snap = await getDoc(doc(db, "clips", id));
+  if (!snap.exists()) return null;
+
+  const data = snap.data() || {};
+  const username = await resolveUsername(data, async (userId) => {
+    const userSnap = await getDoc(doc(db, "users", userId));
+    return userSnap.exists() ? normalizeUsername(userSnap.data()?.username) : null;
+  });
+
+  return { id: snap.id, ...data, username } as ClipForMetadata;
+}
+
 export async function getClipForMetadata(id: string): Promise<ClipForMetadata | null> {
   if (!id) return null;
 
-  if (!isAdminConfigured()) {
-    if (process.env.NODE_ENV === "development") {
-      console.error(
-        "[getClipForMetadata] Firebase Admin env vars missing (FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY).",
-      );
+  if (isAdminConfigured()) {
+    try {
+      const clip = await fetchClipViaAdmin(id);
+      if (clip) return clip;
+    } catch (err) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[getClipForMetadata] Admin fetch failed, trying client SDK:", err);
+      }
     }
-    return null;
+  } else if (process.env.NODE_ENV === "development") {
+    console.warn(
+      "[getClipForMetadata] Admin not configured; using public Firestore client read.",
+    );
   }
 
   try {
-    const adminDb = getAdminDb();
-    const snap = await adminDb.collection("clips").doc(id).get();
-    if (!snap.exists) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn(`[getClipForMetadata] No document at clips/${id}`);
-      }
-      return null;
-    }
-
-    const data = snap.data() || {};
-    let username = normalizeUsername(data.username);
-
-    if (!username && typeof data.userId === "string" && data.userId) {
-      try {
-        const userSnap = await adminDb.collection("users").doc(data.userId).get();
-        if (userSnap.exists) {
-          username = normalizeUsername(userSnap.data()?.username);
-        }
-      } catch (userErr) {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[getClipForMetadata] Username lookup failed:", userErr);
-        }
-      }
-    }
-
-    return { id: snap.id, ...data, username } as ClipForMetadata;
+    return await fetchClipViaClientSdk(id);
   } catch (err) {
     if (process.env.NODE_ENV === "development") {
-      console.error(`[getClipForMetadata] Failed to read clips/${id}:`, err);
+      console.error(`[getClipForMetadata] Client SDK read failed for clips/${id}:`, err);
     }
     return null;
   }
