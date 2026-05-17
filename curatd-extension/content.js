@@ -1,16 +1,41 @@
+console.log("Curatd content script loaded");
+
 (function () {
+  const LOG = "[Curatd]";
   const ROOT_ID = "curatd-clipper-root";
   const BTN_ID = "curatd-save-btn";
   const PANEL_ID = "curatd-save-panel";
   const MIN_CLIP_SECONDS = 1;
 
-  let injected = false;
+  const TITLE_SELECTORS = [
+    "h1.ytd-video-primary-info-renderer",
+    "#title h1",
+    "ytd-watch-metadata h1",
+    "h1.ytd-watch-metadata",
+  ];
+
   let observer = null;
+  let lastInjectedVideoId = "";
+
+  function log(...args) {
+    console.log(LOG, ...args);
+  }
+
+  function isWatchPage() {
+    const ok =
+      location.hostname.includes("youtube.com") &&
+      (location.pathname === "/watch" || location.pathname.startsWith("/watch/"));
+    if (!ok) log("not a watch page", location.pathname);
+    return ok;
+  }
 
   function getVideoId() {
     try {
-      return new URLSearchParams(location.search).get("v") || "";
-    } catch {
+      const id = new URLSearchParams(location.search).get("v") || "";
+      if (!id) log("no video id in URL");
+      return id;
+    } catch (e) {
+      log("getVideoId error", e);
       return "";
     }
   }
@@ -20,10 +45,7 @@
   }
 
   function getVideoTitle() {
-    const h1 =
-      document.querySelector("h1.ytd-watch-metadata yt-formatted-string") ||
-      document.querySelector("#title h1 yt-formatted-string") ||
-      document.querySelector("h1.ytd-video-primary-info-renderer");
+    const h1 = findTitleH1();
     if (h1?.textContent?.trim()) {
       return h1.textContent.trim();
     }
@@ -37,6 +59,37 @@
       document.querySelector("#owner #channel-name a") ||
       document.querySelector("#upload-info a");
     return el?.textContent?.trim() || "YouTube";
+  }
+
+  function findTitleH1() {
+    for (const selector of TITLE_SELECTORS) {
+      const el = document.querySelector(selector);
+      if (el) {
+        log("found title element:", selector);
+        return el;
+      }
+    }
+    log("title h1 not found yet, tried:", TITLE_SELECTORS.join(", "));
+    return null;
+  }
+
+  function findInjectionAnchor(titleH1) {
+    return (
+      titleH1.closest("#title") ||
+      titleH1.closest("ytd-watch-metadata") ||
+      titleH1.parentElement
+    );
+  }
+
+  function removeInjectedUI() {
+    const hadRoot = Boolean(document.getElementById(ROOT_ID));
+    const hadBtn = Boolean(document.getElementById(BTN_ID));
+    const hadPanel = Boolean(document.getElementById(PANEL_ID));
+    document.getElementById(PANEL_ID)?.remove();
+    document.getElementById(ROOT_ID)?.remove();
+    if (hadRoot || hadBtn || hadPanel) {
+      log("removed existing UI", { hadRoot, hadBtn, hadPanel });
+    }
   }
 
   /** @param {number} sec */
@@ -66,14 +119,6 @@
     return `${r}s`;
   }
 
-  function findTitleAnchor() {
-    return (
-      document.querySelector("#above-the-fold #title") ||
-      document.querySelector("ytd-watch-metadata #title") ||
-      document.querySelector("#title")
-    );
-  }
-
   function removePanel() {
     document.getElementById(PANEL_ID)?.remove();
   }
@@ -81,7 +126,6 @@
   /**
    * @param {HTMLElement} container
    * @param {{ duration: number, start: number, end: number }} opts
-   * @returns {{ getStart: () => number, getEnd: () => number, destroy: () => void }}
    */
   function createDualRangeSlider(container, opts) {
     const duration = Math.max(MIN_CLIP_SECONDS, opts.duration);
@@ -207,7 +251,7 @@
     };
   }
 
-  function showPanel(anchor) {
+  function showPanel(titleH1) {
     removePanel();
     const video = getVideoElement();
     const duration =
@@ -312,42 +356,47 @@
         statusEl.className = "curatd-status curatd-status-error";
         statusEl.textContent =
           err?.message ||
-          "Save failed. Sign in via the Curatd Clipper extension icon.";
+          "Save failed. Sign in at curatd.live first, then try again.";
         saveBtn.disabled = false;
       }
     });
 
-    const host =
-      anchor?.parentElement ||
-      document.querySelector("#above-the-fold") ||
-      document.querySelector("ytd-watch-metadata");
-
-    if (host) {
-      host.appendChild(panel);
+    const anchor = findInjectionAnchor(titleH1);
+    if (anchor?.parentElement) {
+      anchor.insertAdjacentElement("afterend", panel);
     } else {
       document.body.appendChild(panel);
     }
+    log("save panel opened");
   }
 
-  function injectButton() {
-    if (injected || !getVideoId()) return;
-    if (document.getElementById(BTN_ID)) {
-      injected = true;
-      return;
+  function injectButton(reason) {
+    log("injectButton called", reason);
+
+    if (!isWatchPage()) return false;
+
+    const videoId = getVideoId();
+    if (!videoId) return false;
+
+    const titleH1 = findTitleH1();
+    if (!titleH1) return false;
+
+    const anchor = findInjectionAnchor(titleH1);
+    if (!anchor) {
+      log("injection anchor not found");
+      return false;
     }
 
-    const titleAnchor = findTitleAnchor();
-    if (!titleAnchor) return;
-
-    const video = getVideoElement();
-    if (!video) return;
-
-    let root = document.getElementById(ROOT_ID);
-    if (!root) {
-      root = document.createElement("div");
-      root.id = ROOT_ID;
-      titleAnchor.insertAdjacentElement("afterend", root);
+    if (document.getElementById(BTN_ID) && lastInjectedVideoId === videoId) {
+      log("button already present for this video");
+      return true;
     }
+
+    removeInjectedUI();
+
+    const root = document.createElement("div");
+    root.id = ROOT_ID;
+    anchor.insertAdjacentElement("afterend", root);
 
     const btn = document.createElement("button");
     btn.id = BTN_ID;
@@ -355,38 +404,70 @@
     btn.className = "curatd-save-trigger";
     btn.textContent = "Save to Curatd";
     btn.title = "Save this moment to Curatd";
-    btn.addEventListener("click", () => showPanel(titleAnchor));
+    btn.addEventListener("click", () => showPanel(titleH1));
 
     root.appendChild(btn);
-    injected = true;
+    lastInjectedVideoId = videoId;
+    log("button injected successfully", { videoId, reason });
+    return true;
   }
 
-  function tryInject() {
-    if (!location.pathname.startsWith("/watch")) return;
-    injectButton();
+  function tryInject(reason) {
+    log("tryInject", reason);
+    if (!isWatchPage()) {
+      removeInjectedUI();
+      lastInjectedVideoId = "";
+      return;
+    }
+    injectButton(reason);
   }
 
-  function start() {
-    tryInject();
+  function onSpaNavigation(reason) {
+    log("SPA navigation detected", reason);
+    removeInjectedUI();
+    lastInjectedVideoId = "";
+    removePanel();
+    setTimeout(() => tryInject(reason), 300);
+    setTimeout(() => tryInject(reason + " (retry)"), 1200);
+  }
+
+  function startObserver() {
+    if (observer) return;
+
+    log("starting MutationObserver on document.body");
     observer = new MutationObserver(() => {
-      if (!document.getElementById(BTN_ID)) {
-        injected = false;
+      if (!isWatchPage()) return;
+      if (!getVideoId()) return;
+      if (document.getElementById(BTN_ID)) return;
+      if (findTitleH1()) {
+        tryInject("mutation-observer");
       }
-      tryInject();
     });
+
     observer.observe(document.body, { childList: true, subtree: true });
   }
 
+  function start() {
+    log("start()", { pathname: location.pathname, href: location.href });
+    tryInject("initial");
+    startObserver();
+
+    window.addEventListener("yt-navigate-finish", () => onSpaNavigation("yt-navigate-finish"));
+    window.addEventListener("yt-page-data-updated", () => onSpaNavigation("yt-page-data-updated"));
+
+    let lastHref = location.href;
+    setInterval(() => {
+      if (location.href !== lastHref) {
+        lastHref = location.href;
+        onSpaNavigation("href-change");
+      }
+    }, 500);
+  }
+
   if (document.readyState === "loading") {
+    log("waiting for DOMContentLoaded");
     document.addEventListener("DOMContentLoaded", start);
   } else {
     start();
   }
-
-  window.addEventListener("yt-navigate-finish", () => {
-    injected = false;
-    removePanel();
-    document.getElementById(ROOT_ID)?.remove();
-    setTimeout(tryInject, 500);
-  });
 })();
