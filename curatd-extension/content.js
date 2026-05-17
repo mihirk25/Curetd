@@ -1,6 +1,8 @@
-console.log("Curatd content script loaded");
-
 (function () {
+  "use strict";
+
+  console.log("Curatd content script loaded");
+
   const LOG = "[Curatd]";
   const ROOT_ID = "curatd-clipper-root";
   const BTN_ID = "curatd-save-btn";
@@ -19,6 +21,34 @@ console.log("Curatd content script loaded");
 
   function log(...args) {
     console.log(LOG, ...args);
+  }
+
+  function hasChromeRuntime() {
+    return (
+      typeof chrome !== "undefined" &&
+      chrome.runtime &&
+      typeof chrome.runtime.sendMessage === "function"
+    );
+  }
+
+  function sendExtensionMessage(message) {
+    return new Promise((resolve, reject) => {
+      if (!hasChromeRuntime()) {
+        reject(new Error("Curatd extension runtime is not available."));
+        return;
+      }
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          if (typeof chrome !== "undefined" && chrome.runtime?.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          resolve(response);
+        });
+      } catch (err) {
+        reject(err);
+      }
+    });
   }
 
   function isWatchPage() {
@@ -329,7 +359,10 @@ console.log("Curatd content script loaded");
       saveBtn.disabled = true;
 
       try {
-        const response = await chrome.runtime.sendMessage({
+        if (!hasChromeRuntime()) {
+          throw new Error("Curatd extension runtime is not available.");
+        }
+        const response = await sendExtensionMessage({
           type: "SAVE_CLIP",
           data: {
             videoId,
@@ -471,3 +504,4 @@ console.log("Curatd content script loaded");
     start();
   }
 })();
+
