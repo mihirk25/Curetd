@@ -8,6 +8,5 @@ const FIREBASE_CONFIG = {
   appId: "1:418205760342:web:edb915fba5933dec2874f7",
 };
 
-if (typeof self !== "undefined") {
-  self.FIREBASE_CONFIG = FIREBASE_CONFIG;
-}
+const globalScope = typeof globalThis !== "undefined" ? globalThis : self;
+globalScope.FIREBASE_CONFIG = FIREBASE_CONFIG;

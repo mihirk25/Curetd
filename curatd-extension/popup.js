@@ -1,5 +1,3 @@
-/* global firebase, FIREBASE_CONFIG */
-
 const loginForm = document.getElementById("login-form");
 const emailInput = document.getElementById("email");
 const passwordInput = document.getElementById("password");
@@ -10,11 +8,7 @@ const loggedInEl = document.getElementById("logged-in");
 const userLabel = document.getElementById("user-label");
 const errorEl = document.getElementById("error");
 
-if (!firebase.apps.length) {
-  firebase.initializeApp(FIREBASE_CONFIG);
-}
-
-const auth = firebase.auth();
+const { signInWithEmailPassword, signOut, getValidSession } = CuratdFirebaseRest;
 
 function showError(msg) {
   if (!msg) {
@@ -26,25 +20,28 @@ function showError(msg) {
   errorEl.classList.add("visible");
 }
 
-function setView(user) {
-  if (user) {
+function setView(session) {
+  if (session) {
     loggedOutEl.classList.remove("visible");
     loggedInEl.classList.add("visible");
-    userLabel.textContent = `You're logged in as ${user.email || user.uid}`;
-    chrome.storage.local.set({
-      user: { uid: user.uid, email: user.email || "" },
-    });
+    userLabel.textContent = `You're logged in as ${session.email || session.uid}`;
   } else {
     loggedInEl.classList.remove("visible");
     loggedOutEl.classList.add("visible");
     userLabel.textContent = "";
-    chrome.storage.local.remove(["user"]);
   }
 }
 
-auth.onAuthStateChanged((user) => {
-  setView(user);
-});
+async function restoreSession() {
+  try {
+    const session = await getValidSession();
+    setView(session);
+  } catch {
+    setView(null);
+  }
+}
+
+restoreSession();
 
 loginForm.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -52,11 +49,12 @@ loginForm.addEventListener("submit", async (e) => {
   loginBtn.disabled = true;
   loginBtn.textContent = "Signing in…";
   try {
-    await auth.signInWithEmailAndPassword(
+    const session = await signInWithEmailPassword(
       emailInput.value.trim(),
       passwordInput.value,
     );
     passwordInput.value = "";
+    setView(session);
   } catch (err) {
     showError(err?.message || "Sign in failed.");
   } finally {
@@ -68,7 +66,8 @@ loginForm.addEventListener("submit", async (e) => {
 logoutBtn.addEventListener("click", async () => {
   showError("");
   try {
-    await auth.signOut();
+    await signOut();
+    setView(null);
   } catch (err) {
     showError(err?.message || "Sign out failed.");
   }

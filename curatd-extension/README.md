@@ -22,7 +22,7 @@ Chrome extension to save YouTube clips directly to your Curatd Firestore account
 1. Click the **Curatd Clipper** icon in the toolbar and **sign in** with your Curatd account email and password.
 2. Open any YouTube video (`youtube.com/watch?v=...`).
 3. Click **Save to Curatd** under the video title.
-4. Adjust start/end times and click **Save Clip**.
+4. Drag the range handles to set clip start/end, then click **Save Clip**.
 
 ## Requirements
 
@@ -38,15 +38,19 @@ curatd-extension/
   content.js          Injected on YouTube watch pages
   background.js       Service worker (auth + Firestore writes)
   styles.css          Injected UI styles
-  firebase-config.js  Firebase project config
+  firebase-config.js  Firebase project config (API key, project ID)
+  firebase-rest.js    Auth + Firestore via REST (no Firebase SDK)
   icons/              16, 48, 128px icons
 ```
 
 ## Development
 
-No build step — edit files and click **Reload** on `chrome://extensions` for the extension.
+No build step and **no external SDK** — all Firebase access uses `fetch` against:
 
-Firebase is loaded from the CDN (compat SDK 9.23.0) in the popup and service worker.
+- Auth: `identitytoolkit.googleapis.com` (sign-in) and `securetoken.googleapis.com` (token refresh)
+- Firestore: `firestore.googleapis.com/v1/projects/.../documents/...`
+
+Edit files and click **Reload** on `chrome://extensions` for the extension.
 
 ## Firestore document shape
 
