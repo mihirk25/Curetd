@@ -23,16 +23,14 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "Curatd",
-    description: "Curate your taste. Express your identity.",
     url: "https://curatd.live",
     siteName: "Curatd",
     images: [{ url: "/og-image.png", width: 1200, height: 630 }],
     type: "website",
   },
   twitter: {
-    card: "summary_large_image",
+    card: "summary",
     title: "Curatd",
-    description: "Curate your taste. Express your identity.",
     images: ["/og-image.png"],
   },
 };

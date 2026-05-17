@@ -1,12 +1,10 @@
 "use client";
 
 /**
- * Client-rendered clip page: Firestore reads run in the browser with the Firebase client SDK
- * so public `clips` reads succeed under security rules (no unauthenticated SSR).
+ * Client-rendered clip UI. OG/social metadata is set server-side in page.tsx.
  */
-import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import Head from "next/head";
 import { useParams, useSearchParams } from "next/navigation";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../../firebase";
@@ -53,10 +51,6 @@ function clipTopicTags(clip) {
   const legacy = typeof clip.topic === "string" ? clip.topic.trim() : "";
   if (legacy) tags.add(legacy);
   return [...tags];
-}
-
-function thumbnailUrl(videoId) {
-  return videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : undefined;
 }
 
 async function fetchClipWithCurator(id) {
@@ -144,22 +138,6 @@ function ClipPageInner() {
     };
   }, [id]);
 
-  const og = useMemo(() => {
-    if (!clip || status !== "ready") return null;
-    const videoId = clip.videoId || extractVideoId(clip.videoUrl || clip.url);
-    const title = clip.title || "Curatd clip";
-    const tags = clipTopicTags(clip);
-    const handle = clip.username ? `@${clip.username}` : "@unknown";
-    const description = `Curated by ${handle}${tags.length > 0 ? ` · ${tags.join(", ")}` : ""}`;
-    const origin =
-      typeof window !== "undefined" && window.location?.origin
-        ? window.location.origin
-        : "";
-    const url = origin ? `${origin}/clip/${clip.id}` : "";
-    const image = thumbnailUrl(videoId);
-    return { title, description, url, image };
-  }, [clip, status]);
-
   const audioOnly = audioOnlyFromParam || clip?.audioOnly === true;
   const primary = clip ? getPrimaryMoment(clip) : null;
   const startSeconds = clip
@@ -179,9 +157,6 @@ function ClipPageInner() {
   if (!id || status === "invalid") {
     return (
       <main className="min-h-screen bg-black px-6 py-16 font-sans text-white">
-        <Head>
-          <title>Invalid link | Curatd</title>
-        </Head>
         <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/30 p-8 text-center">
           <h1 className="text-xl font-bold">Invalid link</h1>
           <p className="mt-2 text-sm text-zinc-500">Missing clip id.</p>
@@ -199,9 +174,6 @@ function ClipPageInner() {
   if (status === "loading") {
     return (
       <main className="min-h-screen bg-black px-6 py-16 font-sans text-white">
-        <Head>
-          <title>Loading clip… | Curatd</title>
-        </Head>
         <div className="mx-auto max-w-4xl py-20 text-center text-sm text-zinc-500">Loading…</div>
       </main>
     );
@@ -210,11 +182,7 @@ function ClipPageInner() {
   if (status === "forbidden") {
     return (
       <main className="min-h-screen bg-black px-6 py-16 font-sans text-white">
-        <Head>
-          <title>Cannot load clip | Curatd</title>
-          <meta name="description" content="You don’t have access to this clip." />
-        </Head>
-        <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/30 p-8 text-center">
+<div className="mx-auto flex max-w-md flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/30 p-8 text-center">
           <h1 className="text-xl font-bold">Can&apos;t load this clip</h1>
           <p className="mt-2 text-sm text-zinc-500">
             Firestore denied access. Try signing in, or check your connection.
@@ -233,10 +201,7 @@ function ClipPageInner() {
   if (status === "error") {
     return (
       <main className="min-h-screen bg-black px-6 py-16 font-sans text-white">
-        <Head>
-          <title>Error | Curatd</title>
-        </Head>
-        <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/30 p-8 text-center">
+<div className="mx-auto flex max-w-md flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/30 p-8 text-center">
           <h1 className="text-xl font-bold">Something went wrong</h1>
           <p className="mt-2 text-sm text-zinc-500">Could not load this clip. Try again.</p>
           <Link
@@ -253,11 +218,7 @@ function ClipPageInner() {
   if (status === "not_found" || !clip) {
     return (
       <main className="min-h-screen bg-black px-6 py-16 font-sans text-white">
-        <Head>
-          <title>Clip not found | Curatd</title>
-          <meta name="description" content="This Curatd clip could not be found." />
-        </Head>
-        <div className="mx-auto flex max-w-md flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/30 p-8 text-center">
+<div className="mx-auto flex max-w-md flex-col items-center rounded-2xl border border-zinc-800 bg-zinc-900/30 p-8 text-center">
           <h1 className="text-xl font-bold">Clip not found</h1>
           <p className="mt-2 text-sm text-zinc-500">
             This clip does not exist or is no longer available.
@@ -274,23 +235,6 @@ function ClipPageInner() {
   }
 
   return (
-    <>
-      {og ? (
-        <Head>
-          <title>{og.title}</title>
-          <meta name="description" content={og.description} />
-          <meta property="og:title" content={og.title} />
-          <meta property="og:description" content={og.description} />
-          {og.url ? <meta property="og:url" content={og.url} /> : null}
-          <meta property="og:type" content="article" />
-          {og.image ? <meta property="og:image" content={og.image} /> : null}
-          <meta name="twitter:card" content="summary_large_image" />
-          <meta name="twitter:title" content={og.title} />
-          <meta name="twitter:description" content={og.description} />
-          {og.image ? <meta name="twitter:image" content={og.image} /> : null}
-        </Head>
-      ) : null}
-
       <main className="min-h-screen bg-black font-sans text-white">
         <div className="mx-auto max-w-4xl px-6 py-8">
           <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
@@ -399,7 +343,6 @@ function ClipPageInner() {
           </div>
         </div>
       </main>
-    </>
   );
 }
 
@@ -408,10 +351,7 @@ export default function SharedClipPage() {
     <Suspense
       fallback={
         <main className="min-h-screen bg-black px-6 py-16 font-sans text-white">
-          <Head>
-            <title>Loading clip… | Curatd</title>
-          </Head>
-          <div className="mx-auto max-w-4xl py-20 text-center text-sm text-zinc-500">Loading…</div>
+<div className="mx-auto max-w-4xl py-20 text-center text-sm text-zinc-500">Loading…</div>
         </main>
       }
     >
