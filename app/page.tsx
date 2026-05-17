@@ -2535,6 +2535,25 @@ export default function CuratdMVP() {
             <span className="text-black text-[10px] leading-none">▶</span>
           </div>
         </button>
+        <Link
+          href="/explore"
+          className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center hover:bg-emerald-500/20 transition-colors"
+          aria-label="Explore"
+          title="Explore"
+        >
+          <div className="w-6 h-6 rounded-md bg-emerald-500 flex items-center justify-center text-black">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+              <path
+                d="m14.5 9.5-2 5-5 2 2-5 5-2Z"
+                fill="currentColor"
+                stroke="currentColor"
+                strokeWidth="1"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+        </Link>
       </aside>
 
       {/* Middle sidebar */}
