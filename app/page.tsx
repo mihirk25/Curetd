@@ -30,6 +30,10 @@ import {
   topicDocId,
   type TopicRecord,
 } from "./lib/topic-directory";
+import {
+  onYoutubeThumbnailError,
+  youtubeThumbnailUrl,
+} from "./lib/clip-playback";
 
 declare global {
   interface Window {
@@ -300,9 +304,10 @@ function FeedVideoPlayer({
           ) : (
             <>
               <img
-                src={`https://img.youtube.com/vi/${videoId}/mqdefault.jpg`}
+                src={youtubeThumbnailUrl(videoId, "max")}
                 alt="Video thumbnail"
                 className="absolute inset-0 w-full h-full object-cover"
+                onError={(e) => onYoutubeThumbnailError(e, videoId)}
               />
               <div className="absolute inset-0 bg-black/10 group-hover:bg-black/30 transition-colors" />
               <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -492,7 +497,7 @@ function AudioOnlyPlayerCard({
   }, [shouldPlay, player, startSeconds, endSeconds, duration, onEnded]);
 
   const fraction = duration > 0 ? Math.max(0, Math.min(1, elapsed / duration)) : 0;
-  const thumb = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+  const thumb = youtubeThumbnailUrl(videoId, "max");
 
   return (
     <div className="absolute inset-0">
@@ -516,9 +521,7 @@ function AudioOnlyPlayerCard({
           src={thumb}
           alt={shouldPlay ? "Playing audio clip" : "Audio clip cover"}
           className="absolute inset-0 h-full w-full object-cover"
-          onError={(e) => {
-            (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
-          }}
+          onError={(e) => onYoutubeThumbnailError(e, videoId)}
         />
         <div className="absolute inset-0 bg-black/55" />
 
@@ -2858,9 +2861,10 @@ export default function CuratdMVP() {
                       <div className="relative aspect-video w-full border-b border-zinc-800 rounded-t-2xl overflow-hidden bg-zinc-950">
                         {vid ? (
                           <img
-                            src={`https://img.youtube.com/vi/${vid}/maxresdefault.jpg`}
+                            src={youtubeThumbnailUrl(vid, "max")}
                             alt={clip.title || "Audio cover"}
                             className="absolute inset-0 w-full h-full object-cover scale-110 blur-lg opacity-45"
+                            onError={(e) => onYoutubeThumbnailError(e, vid)}
                           />
                         ) : null}
                         <div className="absolute inset-0 bg-black/65" />

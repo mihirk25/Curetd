@@ -28,6 +28,31 @@ export function formatTimestamp(sec: number) {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
+const YT_THUMB_QUALITY = {
+  max: "maxresdefault",
+  hq: "hqdefault",
+  mq: "mqdefault",
+} as const;
+
+export function youtubeThumbnailUrl(
+  videoId: string,
+  quality: keyof typeof YT_THUMB_QUALITY = "max",
+) {
+  return `https://img.youtube.com/vi/${videoId}/${YT_THUMB_QUALITY[quality]}.jpg`;
+}
+
+/** Use on <img onError> — falls back from maxresdefault to hqdefault. */
+export function onYoutubeThumbnailError(
+  event: { currentTarget: HTMLImageElement },
+  videoId: string,
+) {
+  const img = event.currentTarget;
+  const hq = youtubeThumbnailUrl(videoId, "hq");
+  if (!img.src.includes("/hqdefault.jpg")) {
+    img.src = hq;
+  }
+}
+
 export type ClipModalPlayback = {
   embedUrl: string;
   originalYouTubeUrl: string;

@@ -37,7 +37,13 @@ import {
   isFollowing,
   unfollowUser,
 } from "../lib/firestore";
-import { extractVideoId, formatTimestamp, toSeconds } from "../lib/clip-playback";
+import {
+  extractVideoId,
+  formatTimestamp,
+  onYoutubeThumbnailError,
+  toSeconds,
+  youtubeThumbnailUrl,
+} from "../lib/clip-playback";
 import { toSlug } from "../lib/slug";
 import { ClipYoutubeModal } from "../components/clip-youtube-modal";
 import { NewCollectionModal } from "../components/new-collection-modal";
@@ -930,9 +936,10 @@ export default function PublicProfilePage() {
                         >
                           {vid ? (
                             <img
-                              src={`https://img.youtube.com/vi/${vid}/mqdefault.jpg`}
+                              src={youtubeThumbnailUrl(vid, "max")}
                               alt=""
                               className="h-full w-full object-cover"
+                              onError={(e) => onYoutubeThumbnailError(e, vid)}
                             />
                           ) : (
                             <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">

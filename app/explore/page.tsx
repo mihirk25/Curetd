@@ -19,7 +19,13 @@ import { CuratorSearchBar } from "../curator-search-bar";
 import { SignInCuratorModal } from "../sign-in-curator-modal";
 import { useUnreadMessageCount } from "../messages/use-unread-count";
 import { followUser, getFollowerCount, unfollowUser } from "../lib/firestore";
-import { extractVideoId, formatTimestamp, toSeconds } from "../lib/clip-playback";
+import {
+  extractVideoId,
+  formatTimestamp,
+  onYoutubeThumbnailError,
+  toSeconds,
+  youtubeThumbnailUrl,
+} from "../lib/clip-playback";
 import { ClipYoutubeModal } from "../components/clip-youtube-modal";
 
 const EXPLORE_TOPICS = [
@@ -472,9 +478,10 @@ function ExploreClipCard({
       >
         {vid ? (
           <img
-            src={`https://img.youtube.com/vi/${vid}/mqdefault.jpg`}
+            src={youtubeThumbnailUrl(vid, "max")}
             alt=""
             className="h-full w-full object-cover"
+            onError={(e) => onYoutubeThumbnailError(e, vid)}
           />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
