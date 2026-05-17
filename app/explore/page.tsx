@@ -26,6 +26,8 @@ import {
   youtubeThumbnailImgProps,
 } from "../lib/clip-playback";
 import { ClipYoutubeModal } from "../components/clip-youtube-modal";
+import { subscribeToTopics, type TopicRecord } from "../lib/topic-directory";
+import { CURATD_TOPICS } from "../lib/topics";
 
 const EXPLORE_TOPICS = [
   "Philosophy",
@@ -98,6 +100,109 @@ export default function ExplorePage() {
   const [followBusyByUid, setFollowBusyByUid] = useState<Record<string, boolean>>({});
   const [selectedClip, setSelectedClip] = useState<Record<string, unknown> | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [exploreSearch, setExploreSearch] = useState("");
+  const [debouncedExploreSearch, setDebouncedExploreSearch] = useState("");
+  const [allTopics, setAllTopics] = useState<TopicRecord[]>([]);
+  const [searchableCurators, setSearchableCurators] = useState<FeaturedCurator[]>([]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDebouncedExploreSearch(exploreSearch);
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [exploreSearch]);
+
+  useEffect(() => {
+    return subscribeToTopics(setAllTopics, () => setAllTopics([]));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDocs(query(collection(db, "users"), orderBy("username"), limit(120)));
+        if (cancelled) return;
+        const rows = await Promise.all(
+          snap.docs.map(async (d) => {
+            const data = d.data() as Record<string, unknown>;
+            const username =
+              typeof data.username === "string" && data.username.trim()
+                ? data.username.trim().toLowerCase()
+                : "";
+            if (!username) return null;
+            let followerCount =
+              typeof data.followerCount === "number" ? data.followerCount : 0;
+            if (!followerCount) {
+              try {
+                followerCount = await getFollowerCount(d.id);
+              } catch {}
+            }
+            const displayName =
+              typeof data.displayName === "string" && data.displayName.trim()
+                ? data.displayName.trim()
+                : username;
+            return {
+              uid: d.id,
+              username,
+              displayName,
+              photoURL: typeof data.photoURL === "string" ? data.photoURL : null,
+              followerCount,
+            } satisfies FeaturedCurator;
+          }),
+        );
+        setSearchableCurators((rows.filter(Boolean) as FeaturedCurator[]) || []);
+      } catch {
+        if (!cancelled) setSearchableCurators([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const isExploreSearching = debouncedExploreSearch.trim().length > 0;
+
+  const exploreSearchResults = useMemo(() => {
+    const q = debouncedExploreSearch.trim().toLowerCase();
+    if (!q) return { curators: [] as FeaturedCurator[], topics: [] as { name: string; count: number }[] };
+
+    const curators = searchableCurators
+      .filter((c) => {
+        const u = c.username.toLowerCase();
+        const d = c.displayName.toLowerCase();
+        return u.includes(q) || d.includes(q);
+      })
+      .sort((a, b) => b.followerCount - a.followerCount || a.username.localeCompare(b.username))
+      .slice(0, 12);
+
+    const countByKey = new Map<string, { name: string; count: number }>();
+    for (const t of allTopics) {
+      const key = t.name.trim().toLowerCase();
+      if (!key) continue;
+      countByKey.set(key, { name: t.name, count: t.count });
+    }
+    for (const name of CURATD_TOPICS) {
+      const key = name.trim().toLowerCase();
+      if (!countByKey.has(key)) countByKey.set(key, { name, count: 0 });
+    }
+    for (const name of EXPLORE_TOPICS) {
+      const key = name.trim().toLowerCase();
+      if (!countByKey.has(key)) countByKey.set(key, { name, count: 0 });
+    }
+
+    const topics = [...countByKey.values()]
+      .filter((t) => t.name.toLowerCase().includes(q))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+      .slice(0, 12);
+
+    return { curators, topics };
+  }, [debouncedExploreSearch, searchableCurators, allTopics]);
+
+  const applyTopicFromSearch = useCallback((topicName: string) => {
+    setSelectedTopic(topicName);
+    setExploreSearch("");
+    setDebouncedExploreSearch("");
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -306,7 +411,119 @@ export default function ExplorePage() {
           <h1 className="text-2xl font-bold text-white">Explore</h1>
           <p className="mt-1 text-sm text-zinc-500">Discover curators and clips across Curatd.</p>
 
+          {/* Explore search */}
+          <div className="relative mt-6 max-w-xl">
+            <span
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+              aria-hidden
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="opacity-80">
+                <path
+                  d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                />
+                <path
+                  d="M16 16l4.5 4.5"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <input
+              type="search"
+              value={exploreSearch}
+              onChange={(e) => setExploreSearch(e.target.value)}
+              placeholder="Search curators or topics…"
+              autoComplete="off"
+              className="w-full rounded-full border border-zinc-700 bg-zinc-900 py-2.5 pl-10 pr-4 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-zinc-500 focus:ring-2 focus:ring-emerald-500/30"
+            />
+            {exploreSearch ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setExploreSearch("");
+                  setDebouncedExploreSearch("");
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-zinc-400 hover:text-white"
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+
+          {isExploreSearching ? (
+            <div className="mt-6 space-y-8">
+              <section>
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">Curators</h2>
+                {exploreSearchResults.curators.length === 0 ? (
+                  <p className="mt-3 text-sm text-zinc-500">No curators match your search.</p>
+                ) : (
+                  <ul className="mt-3 divide-y divide-zinc-800/80 rounded-xl border border-zinc-800/60 bg-zinc-950/50">
+                    {exploreSearchResults.curators.map((c) => (
+                      <li key={c.uid}>
+                        <button
+                          type="button"
+                          onClick={() => router.push(`/${c.username}`)}
+                          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-zinc-900/60"
+                        >
+                          {c.photoURL ? (
+                            <img
+                              src={c.photoURL}
+                              alt=""
+                              className="h-10 w-10 shrink-0 rounded-full border border-zinc-700 object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-emerald-400/30 bg-emerald-500 text-sm font-bold text-black">
+                              {c.username.slice(0, 1).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-semibold text-white">@{c.username}</div>
+                            {c.displayName !== c.username ? (
+                              <div className="truncate text-xs text-zinc-400">{c.displayName}</div>
+                            ) : null}
+                          </div>
+                          <div className="shrink-0 text-xs text-zinc-500">
+                            {c.followerCount} follower{c.followerCount === 1 ? "" : "s"}
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section>
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">Topics</h2>
+                {exploreSearchResults.topics.length === 0 ? (
+                  <p className="mt-3 text-sm text-zinc-500">No topics match your search.</p>
+                ) : (
+                  <ul className="mt-3 divide-y divide-zinc-800/80 rounded-xl border border-zinc-800/60 bg-zinc-950/50">
+                    {exploreSearchResults.topics.map((t) => (
+                      <li key={t.name}>
+                        <button
+                          type="button"
+                          onClick={() => applyTopicFromSearch(t.name)}
+                          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-zinc-900/60"
+                        >
+                          <span className="text-sm font-medium text-white">{t.name}</span>
+                          <span className="shrink-0 text-xs text-zinc-500">
+                            {t.count} clip{t.count === 1 ? "" : "s"}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
+          ) : null}
+
           {/* Featured curators */}
+          {!isExploreSearching ? (
+          <>
           <section className="mt-8">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">Featured curators</h2>
             {curatorsLoading ? (
@@ -396,6 +613,8 @@ export default function ExplorePage() {
               ))}
             </div>
           </section>
+          </>
+          ) : null}
 
           {/* Explore feed */}
           <section className="mt-10 pb-16">
