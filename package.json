@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "generate:og": "node scripts/generate-og-image.mjs"
+    "generate:og": "node scripts/generate-og-image.mjs",
+    "generate:favicons": "node scripts/generate-favicons.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -26,6 +27,7 @@
     "eslint-config-next": "16.2.4",
     "sharp": "^0.34.5",
     "tailwindcss": "^4",
+    "to-ico": "^1.1.5",
     "typescript": "^5"
   }
 }
