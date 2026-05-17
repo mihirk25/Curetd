@@ -4,10 +4,13 @@
   console.log("Curatd content script loaded");
 
   const LOG = "[Curatd]";
-  const ROOT_ID = "curatd-clipper-root";
+  const FLOAT_ROOT_ID = "curatd-floating-root";
   const BTN_ID = "curatd-save-btn";
   const PANEL_ID = "curatd-save-panel";
+  const POS_STORAGE_KEY = "curatdFloatingBtnPos";
   const MIN_CLIP_SECONDS = 1;
+  const DRAG_THRESHOLD_PX = 6;
+  const DEFAULT_POS = { left: 20, bottom: 80 };
 
   const TITLE_SELECTORS = [
     "h1.ytd-video-primary-info-renderer",
@@ -16,8 +19,8 @@
     "h1.ytd-watch-metadata",
   ];
 
-  let observer = null;
-  let lastInjectedVideoId = "";
+  let floatingRoot = null;
+  let routeCheckInterval = null;
 
   function log(...args) {
     console.log(LOG, ...args);
@@ -29,6 +32,52 @@
       chrome.runtime &&
       typeof chrome.runtime.sendMessage === "function"
     );
+  }
+
+  function hasChromeStorage() {
+    return typeof chrome !== "undefined" && chrome.storage && chrome.storage.local;
+  }
+
+  function storageGet(keys) {
+    return new Promise((resolve) => {
+      if (!hasChromeStorage()) {
+        resolve({});
+        return;
+      }
+      try {
+        chrome.storage.local.get(keys, (result) => {
+          if (typeof chrome !== "undefined" && chrome.runtime?.lastError) {
+            log("storage get error", chrome.runtime.lastError.message);
+            resolve({});
+            return;
+          }
+          resolve(result || {});
+        });
+      } catch (e) {
+        log("storage get exception", e);
+        resolve({});
+      }
+    });
+  }
+
+  function storageSet(data) {
+    return new Promise((resolve) => {
+      if (!hasChromeStorage()) {
+        resolve();
+        return;
+      }
+      try {
+        chrome.storage.local.set(data, () => {
+          if (typeof chrome !== "undefined" && chrome.runtime?.lastError) {
+            log("storage set error", chrome.runtime.lastError.message);
+          }
+          resolve();
+        });
+      } catch (e) {
+        log("storage set exception", e);
+        resolve();
+      }
+    });
   }
 
   function sendExtensionMessage(message) {
@@ -103,23 +152,178 @@
     return null;
   }
 
-  function findInjectionAnchor(titleH1) {
-    return (
-      titleH1.closest("#title") ||
-      titleH1.closest("ytd-watch-metadata") ||
-      titleH1.parentElement
-    );
+  function removePanel() {
+    document.getElementById(PANEL_ID)?.remove();
   }
 
-  function removeInjectedUI() {
-    const hadRoot = Boolean(document.getElementById(ROOT_ID));
-    const hadBtn = Boolean(document.getElementById(BTN_ID));
-    const hadPanel = Boolean(document.getElementById(PANEL_ID));
-    document.getElementById(PANEL_ID)?.remove();
-    document.getElementById(ROOT_ID)?.remove();
-    if (hadRoot || hadBtn || hadPanel) {
-      log("removed existing UI", { hadRoot, hadBtn, hadPanel });
+  function applyButtonPosition(el, pos) {
+    if (pos && typeof pos.left === "number" && typeof pos.top === "number") {
+      el.style.left = `${pos.left}px`;
+      el.style.top = `${pos.top}px`;
+      el.style.bottom = "auto";
+      el.style.right = "auto";
+      return;
     }
+    el.style.left = `${DEFAULT_POS.left}px`;
+    el.style.bottom = `${DEFAULT_POS.bottom}px`;
+    el.style.top = "auto";
+    el.style.right = "auto";
+  }
+
+  async function loadButtonPosition() {
+    const result = await storageGet([POS_STORAGE_KEY]);
+    return result[POS_STORAGE_KEY] || null;
+  }
+
+  async function saveButtonPosition(pos) {
+    await storageSet({ [POS_STORAGE_KEY]: pos });
+    log("saved button position", pos);
+  }
+
+  function clampPosition(left, top, width, height) {
+    const maxLeft = Math.max(8, window.innerWidth - width - 8);
+    const maxTop = Math.max(8, window.innerHeight - height - 8);
+    return {
+      left: Math.max(8, Math.min(maxLeft, left)),
+      top: Math.max(8, Math.min(maxTop, top)),
+    };
+  }
+
+  function setupDraggableButton(btn) {
+    let dragging = false;
+    let moved = false;
+    let startX = 0;
+    let startY = 0;
+    let startLeft = 0;
+    let startTop = 0;
+
+    btn.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      dragging = true;
+      moved = false;
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = btn.getBoundingClientRect();
+      startLeft = rect.left;
+      startTop = rect.top;
+      btn.style.bottom = "auto";
+      btn.style.right = "auto";
+      btn.style.left = `${startLeft}px`;
+      btn.style.top = `${startTop}px`;
+      btn.classList.add("curatd-save-trigger--dragging");
+      btn.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+
+    btn.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (!moved && (Math.abs(dx) > DRAG_THRESHOLD_PX || Math.abs(dy) > DRAG_THRESHOLD_PX)) {
+        moved = true;
+      }
+      if (!moved) return;
+      const next = clampPosition(
+        startLeft + dx,
+        startTop + dy,
+        btn.offsetWidth,
+        btn.offsetHeight,
+      );
+      btn.style.left = `${next.left}px`;
+      btn.style.top = `${next.top}px`;
+    });
+
+    const endDrag = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      btn.classList.remove("curatd-save-trigger--dragging");
+      try {
+        btn.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+
+      if (moved) {
+        const left = parseFloat(btn.style.left) || 0;
+        const top = parseFloat(btn.style.top) || 0;
+        void saveButtonPosition({ left, top });
+        return;
+      }
+
+      if (isWatchPage() && getVideoId()) {
+        showPanel();
+      }
+    };
+
+    btn.addEventListener("pointerup", endDrag);
+    btn.addEventListener("pointercancel", endDrag);
+  }
+
+  function positionPanelNearButton(panel) {
+    const btn = document.getElementById(BTN_ID);
+    if (!btn) {
+      panel.style.left = "20px";
+      panel.style.bottom = "160px";
+      return;
+    }
+    const rect = btn.getBoundingClientRect();
+    const panelWidth = 360;
+    const left = Math.max(12, Math.min(window.innerWidth - panelWidth - 12, rect.left));
+    let top = rect.bottom + 12;
+    if (top + 320 > window.innerHeight) {
+      top = Math.max(12, rect.top - 320);
+    }
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
+  }
+
+  function updateFloatingButtonVisibility() {
+    if (!floatingRoot) return;
+    const show = isWatchPage() && Boolean(getVideoId());
+    floatingRoot.style.display = show ? "block" : "none";
+    log("floating button visibility", show);
+  }
+
+  async function ensureFloatingButton() {
+    if (floatingRoot && document.body.contains(floatingRoot)) {
+      updateFloatingButtonVisibility();
+      return floatingRoot;
+    }
+
+    const existing = document.getElementById(FLOAT_ROOT_ID);
+    if (existing) {
+      floatingRoot = existing;
+      updateFloatingButtonVisibility();
+      return floatingRoot;
+    }
+
+    log("creating floating button");
+    const root = document.createElement("div");
+    root.id = FLOAT_ROOT_ID;
+    root.className = "curatd-floating-root";
+
+    const btn = document.createElement("button");
+    btn.id = BTN_ID;
+    btn.type = "button";
+    btn.className = "curatd-save-trigger";
+    btn.title = "Save this moment to Curatd";
+    btn.innerHTML = `
+      <svg class="curatd-save-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M6 4h12a2 2 0 0 1 2 2v14l-8-4-8 4V6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+      </svg>
+      <span>Save to Curatd</span>
+    `;
+
+    const savedPos = await loadButtonPosition();
+    applyButtonPosition(btn, savedPos);
+    setupDraggableButton(btn);
+
+    root.appendChild(btn);
+    document.body.appendChild(root);
+    floatingRoot = root;
+    updateFloatingButtonVisibility();
+    log("floating button created");
+    return floatingRoot;
   }
 
   /** @param {number} sec */
@@ -147,10 +351,6 @@
     if (m > 0 && r > 0) return `${m}m ${r}s`;
     if (m > 0) return `${m}m`;
     return `${r}s`;
-  }
-
-  function removePanel() {
-    document.getElementById(PANEL_ID)?.remove();
   }
 
   /**
@@ -281,7 +481,7 @@
     };
   }
 
-  function showPanel(titleH1) {
+  function showPanel() {
     removePanel();
     const video = getVideoElement();
     const duration =
@@ -298,7 +498,7 @@
 
     const panel = document.createElement("div");
     panel.id = PANEL_ID;
-    panel.className = "curatd-panel";
+    panel.className = "curatd-panel curatd-panel--floating";
     panel.innerHTML = `
       <div class="curatd-panel-header">
         <span class="curatd-panel-brand">Save to Curatd</span>
@@ -394,107 +594,47 @@
       }
     });
 
-    const anchor = findInjectionAnchor(titleH1);
-    if (anchor?.parentElement) {
-      anchor.insertAdjacentElement("afterend", panel);
-    } else {
-      document.body.appendChild(panel);
-    }
+    document.body.appendChild(panel);
+    positionPanelNearButton(panel);
     log("save panel opened");
   }
 
-  function injectButton(reason) {
-    log("injectButton called", reason);
-
-    if (!isWatchPage()) return false;
-
-    const videoId = getVideoId();
-    if (!videoId) return false;
-
-    const titleH1 = findTitleH1();
-    if (!titleH1) return false;
-
-    const anchor = findInjectionAnchor(titleH1);
-    if (!anchor) {
-      log("injection anchor not found");
-      return false;
-    }
-
-    if (document.getElementById(BTN_ID) && lastInjectedVideoId === videoId) {
-      log("button already present for this video");
-      return true;
-    }
-
-    removeInjectedUI();
-
-    const root = document.createElement("div");
-    root.id = ROOT_ID;
-    anchor.insertAdjacentElement("afterend", root);
-
-    const btn = document.createElement("button");
-    btn.id = BTN_ID;
-    btn.type = "button";
-    btn.className = "curatd-save-trigger";
-    btn.textContent = "Save to Curatd";
-    btn.title = "Save this moment to Curatd";
-    btn.addEventListener("click", () => showPanel(titleH1));
-
-    root.appendChild(btn);
-    lastInjectedVideoId = videoId;
-    log("button injected successfully", { videoId, reason });
-    return true;
-  }
-
-  function tryInject(reason) {
-    log("tryInject", reason);
-    if (!isWatchPage()) {
-      removeInjectedUI();
-      lastInjectedVideoId = "";
-      return;
-    }
-    injectButton(reason);
-  }
-
-  function onSpaNavigation(reason) {
-    log("SPA navigation detected", reason);
-    removeInjectedUI();
-    lastInjectedVideoId = "";
+  function onRouteChange(reason) {
+    log("route change", reason);
     removePanel();
-    setTimeout(() => tryInject(reason), 300);
-    setTimeout(() => tryInject(reason + " (retry)"), 1200);
-  }
-
-  function startObserver() {
-    if (observer) return;
-
-    log("starting MutationObserver on document.body");
-    observer = new MutationObserver(() => {
-      if (!isWatchPage()) return;
-      if (!getVideoId()) return;
-      if (document.getElementById(BTN_ID)) return;
-      if (findTitleH1()) {
-        tryInject("mutation-observer");
-      }
-    });
-
-    observer.observe(document.body, { childList: true, subtree: true });
+    void ensureFloatingButton();
+    updateFloatingButtonVisibility();
   }
 
   function start() {
     log("start()", { pathname: location.pathname, href: location.href });
-    tryInject("initial");
-    startObserver();
+    void ensureFloatingButton();
 
-    window.addEventListener("yt-navigate-finish", () => onSpaNavigation("yt-navigate-finish"));
-    window.addEventListener("yt-page-data-updated", () => onSpaNavigation("yt-page-data-updated"));
+    window.addEventListener("yt-navigate-finish", () => onRouteChange("yt-navigate-finish"));
+    window.addEventListener("yt-page-data-updated", () => onRouteChange("yt-page-data-updated"));
 
     let lastHref = location.href;
-    setInterval(() => {
+    if (routeCheckInterval) clearInterval(routeCheckInterval);
+    routeCheckInterval = setInterval(() => {
       if (location.href !== lastHref) {
         lastHref = location.href;
-        onSpaNavigation("href-change");
+        onRouteChange("href-change");
+      } else if (isWatchPage() && getVideoId()) {
+        updateFloatingButtonVisibility();
       }
     }, 500);
+
+    window.addEventListener("resize", () => {
+      const btn = document.getElementById(BTN_ID);
+      if (!btn) return;
+      const left = parseFloat(btn.style.left);
+      const top = parseFloat(btn.style.top);
+      if (Number.isFinite(left) && Number.isFinite(top)) {
+        const next = clampPosition(left, top, btn.offsetWidth, btn.offsetHeight);
+        btn.style.left = `${next.left}px`;
+        btn.style.top = `${next.top}px`;
+      }
+    });
   }
 
   if (document.readyState === "loading") {
