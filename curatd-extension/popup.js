@@ -1,74 +1,54 @@
-const loginForm = document.getElementById("login-form");
-const emailInput = document.getElementById("email");
-const passwordInput = document.getElementById("password");
-const loginBtn = document.getElementById("login-btn");
-const logoutBtn = document.getElementById("logout-btn");
-const loggedOutEl = document.getElementById("logged-out");
-const loggedInEl = document.getElementById("logged-in");
+const stateLoading = document.getElementById("state-loading");
+const stateLoggedIn = document.getElementById("state-logged-in");
+const stateLoggedOut = document.getElementById("state-logged-out");
 const userLabel = document.getElementById("user-label");
-const errorEl = document.getElementById("error");
+const openCuratdBtn = document.getElementById("open-curatd-btn");
 
-const { signInWithEmailPassword, signOut, getValidSession } = CuratdFirebaseRest;
+const CURATD_URL = "https://curatd.live";
 
-function showError(msg) {
-  if (!msg) {
-    errorEl.textContent = "";
-    errorEl.classList.remove("visible");
-    return;
-  }
-  errorEl.textContent = msg;
-  errorEl.classList.add("visible");
+function showState(name) {
+  stateLoading.classList.remove("visible");
+  stateLoggedIn.classList.remove("visible");
+  stateLoggedOut.classList.remove("visible");
+  if (name === "loading") stateLoading.classList.add("visible");
+  if (name === "logged-in") stateLoggedIn.classList.add("visible");
+  if (name === "logged-out") stateLoggedOut.classList.add("visible");
 }
 
-function setView(session) {
-  if (session) {
-    loggedOutEl.classList.remove("visible");
-    loggedInEl.classList.add("visible");
-    userLabel.textContent = `You're logged in as ${session.email || session.uid}`;
-  } else {
-    loggedInEl.classList.remove("visible");
-    loggedOutEl.classList.add("visible");
-    userLabel.textContent = "";
-  }
+function setLoggedIn(session) {
+  const email = session?.email || session?.uid || "your account";
+  userLabel.innerHTML = `Logged in as <strong>${escapeHtml(email)}</strong>`;
+  showState("logged-in");
 }
 
-async function restoreSession() {
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function setLoggedOut() {
+  showState("logged-out");
+}
+
+async function checkSession() {
+  showState("loading");
   try {
-    const session = await getValidSession();
-    setView(session);
+    const response = await chrome.runtime.sendMessage({ type: "GET_CURATD_SESSION" });
+    if (response?.session?.idToken) {
+      setLoggedIn(response.session);
+    } else {
+      setLoggedOut();
+    }
   } catch {
-    setView(null);
+    setLoggedOut();
   }
 }
 
-restoreSession();
-
-loginForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  showError("");
-  loginBtn.disabled = true;
-  loginBtn.textContent = "Signing in…";
-  try {
-    const session = await signInWithEmailPassword(
-      emailInput.value.trim(),
-      passwordInput.value,
-    );
-    passwordInput.value = "";
-    setView(session);
-  } catch (err) {
-    showError(err?.message || "Sign in failed.");
-  } finally {
-    loginBtn.disabled = false;
-    loginBtn.textContent = "Sign in";
-  }
+openCuratdBtn.addEventListener("click", () => {
+  chrome.tabs.create({ url: CURATD_URL });
 });
 
-logoutBtn.addEventListener("click", async () => {
-  showError("");
-  try {
-    await signOut();
-    setView(null);
-  } catch (err) {
-    showError(err?.message || "Sign out failed.");
-  }
-});
+checkSession();

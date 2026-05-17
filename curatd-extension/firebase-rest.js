@@ -1,10 +1,7 @@
 /**
- * Firebase Auth + Firestore via REST (no SDK).
- * Loaded in popup (window) and service worker (self).
+ * Firestore REST (no SDK). Auth session comes from curatd.live via CuratdAuth.
  */
 (function (globalScope) {
-  const STORAGE_KEY = "curatdAuth";
-
   function cfg() {
     if (typeof FIREBASE_CONFIG === "undefined") {
       throw new Error("FIREBASE_CONFIG is not defined.");
@@ -72,41 +69,6 @@
     return parts[parts.length - 1] || "";
   }
 
-  function storageGet(keys) {
-    return new Promise((resolve) => {
-      chrome.storage.local.get(keys, resolve);
-    });
-  }
-
-  function storageSet(data) {
-    return new Promise((resolve) => {
-      chrome.storage.local.set(data, resolve);
-    });
-  }
-
-  function storageRemove(keys) {
-    return new Promise((resolve) => {
-      chrome.storage.local.remove(keys, resolve);
-    });
-  }
-
-  async function getSession() {
-    const result = await storageGet([STORAGE_KEY]);
-    return result[STORAGE_KEY] || null;
-  }
-
-  async function saveSession(session) {
-    await storageSet({
-      [STORAGE_KEY]: session,
-      user: { uid: session.uid, email: session.email || "" },
-    });
-    return session;
-  }
-
-  async function clearSession() {
-    await storageRemove([STORAGE_KEY, "user"]);
-  }
-
   async function refreshSession(session) {
     const { apiKey } = cfg();
     const res = await fetch(
@@ -125,18 +87,20 @@
       throw new Error(data?.error?.message || "Token refresh failed.");
     }
     const expiresIn = Number(data.expires_in) || 3600;
-    const next = {
+    return {
       idToken: data.id_token,
       refreshToken: data.refresh_token || session.refreshToken,
       uid: data.user_id || session.uid,
       email: session.email || "",
       expiresAt: Date.now() + expiresIn * 1000,
     };
-    return saveSession(next);
   }
 
   async function getValidSession() {
-    let session = await getSession();
+    if (typeof CuratdAuth === "undefined") {
+      throw new Error("CuratdAuth is not loaded.");
+    }
+    let session = await CuratdAuth.getCuratdLiveSession();
     if (!session?.idToken) return null;
     if (session.expiresAt > Date.now() + 60_000) return session;
     if (!session.refreshToken) return null;
@@ -144,47 +108,14 @@
       session = await refreshSession(session);
       return session;
     } catch {
-      await clearSession();
       return null;
     }
-  }
-
-  async function signInWithEmailPassword(email, password) {
-    const { apiKey } = cfg();
-    const res = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          password,
-          returnSecureToken: true,
-        }),
-      },
-    );
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data?.error?.message || "Sign in failed.");
-    }
-    const expiresIn = Number(data.expiresIn) || 3600;
-    return saveSession({
-      idToken: data.idToken,
-      refreshToken: data.refreshToken,
-      uid: data.localId,
-      email: data.email || email,
-      expiresAt: Date.now() + expiresIn * 1000,
-    });
-  }
-
-  async function signOut() {
-    await clearSession();
   }
 
   async function firestoreRequest(path, options = {}) {
     const session = await getValidSession();
     if (!session) {
-      throw new Error("Not signed in. Open the Curatd Clipper popup and sign in.");
+      throw new Error("Please sign in at curatd.live first, then try again.");
     }
     const { projectId } = cfg();
     const base = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
@@ -216,7 +147,7 @@
     const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:runQuery`;
     const session = await getValidSession();
     if (!session) {
-      throw new Error("Not signed in. Open the Curatd Clipper popup and sign in.");
+      throw new Error("Please sign in at curatd.live first, then try again.");
     }
     const res = await fetch(url, {
       method: "POST",
@@ -329,7 +260,7 @@
   async function saveClip(data) {
     const session = await getValidSession();
     if (!session) {
-      throw new Error("Not signed in. Open the Curatd Clipper popup and sign in.");
+      throw new Error("Please sign in at curatd.live first, then try again.");
     }
 
     const videoId = String(data.videoId || "").trim();
@@ -403,15 +334,7 @@
   }
 
   globalScope.CuratdFirebaseRest = {
-    STORAGE_KEY,
-    getSession,
     getValidSession,
-    saveSession,
-    clearSession,
-    refreshSession,
-    signInWithEmailPassword,
-    signOut,
     saveClip,
-    getUserProfile,
   };
 })(typeof globalThis !== "undefined" ? globalThis : self);

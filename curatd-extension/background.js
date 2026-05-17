@@ -1,18 +1,37 @@
-importScripts("firebase-config.js", "firebase-rest.js");
+importScripts("firebase-config.js", "curatd-auth.js", "firebase-rest.js");
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type === "GET_USER") {
-    CuratdFirebaseRest.getValidSession()
-      .then((session) => {
-        if (!session) {
-          sendResponse({ user: null });
+  if (message?.type === "GET_CURATD_SESSION" || message?.type === "GET_USER") {
+    CuratdAuth.getCuratdLiveSession()
+      .then(async (session) => {
+        if (!session?.idToken) {
+          sendResponse({ session: null, user: null });
           return;
         }
-        sendResponse({
-          user: { uid: session.uid, email: session.email || "" },
-        });
+        if (session.expiresAt > Date.now() + 60_000) {
+          sendResponse({
+            session,
+            user: { uid: session.uid, email: session.email || "" },
+          });
+          return;
+        }
+        if (!session.refreshToken) {
+          sendResponse({ session: null, user: null });
+          return;
+        }
+        try {
+          const refreshed = await CuratdFirebaseRest.getValidSession();
+          sendResponse({
+            session: refreshed,
+            user: refreshed
+              ? { uid: refreshed.uid, email: refreshed.email || "" }
+              : null,
+          });
+        } catch {
+          sendResponse({ session: null, user: null });
+        }
       })
-      .catch(() => sendResponse({ user: null }));
+      .catch(() => sendResponse({ session: null, user: null }));
     return true;
   }
 

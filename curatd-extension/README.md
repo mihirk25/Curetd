@@ -6,7 +6,7 @@ Chrome extension to save YouTube clips directly to your Curatd Firestore account
 
 - **Save to Curatd** button below the video title on YouTube watch pages
 - Set start/end timestamps (pre-filled from current playback time)
-- Sign in with the same Firebase email/password as [curatd.live](https://curatd.live)
+- Uses your existing [curatd.live](https://curatd.live) login — no separate extension sign-in
 - Clips are saved to the `clips` collection with `source: "extension"`
 
 ## Load in Chrome (unpacked)
@@ -19,27 +19,30 @@ Chrome extension to save YouTube clips directly to your Curatd Firestore account
 
 ## Usage
 
-1. Click the **Curatd Clipper** icon in the toolbar and **sign in** with your Curatd account email and password.
-2. Open any YouTube video (`youtube.com/watch?v=...`).
-3. Click **Save to Curatd** under the video title.
-4. Drag the range handles to set clip start/end, then click **Save Clip**.
+1. **Sign in at [curatd.live](https://curatd.live)** in Chrome (same browser profile).
+2. Click the **Curatd Clipper** icon — you should see “Logged in as [email]” with a green checkmark.
+3. Open any YouTube video (`youtube.com/watch?v=...`).
+4. Click **Save to Curatd** under the video title.
+5. Drag the range handles to set clip start/end, then click **Save Clip**.
 
 ## Requirements
 
-- A Curatd account with **Email/Password** sign-in enabled in Firebase Auth (same as the web app).
-- You must be signed in via the extension popup before saving clips.
+- Be signed in at **curatd.live** in the same Chrome profile.
+- If the popup says “Please sign in at curatd.live first”, open the site, sign in, then click the extension icon again.
 
 ## File structure
 
 ```
 curatd-extension/
   manifest.json       Manifest V3
-  popup.html / popup.js   Login UI
+  popup.html / popup.js   Session status UI
   content.js          Injected on YouTube watch pages
-  background.js       Service worker (auth + Firestore writes)
+  curatd-site.js      Reads auth from curatd.live localStorage
+  curatd-auth.js      Cookie + site session reader
+  background.js       Service worker (session + Firestore writes)
   styles.css          Injected UI styles
   firebase-config.js  Firebase project config (API key, project ID)
-  firebase-rest.js    Auth + Firestore via REST (no Firebase SDK)
+  firebase-rest.js    Firestore via REST (no Firebase SDK)
   icons/              16, 48, 128px icons
 ```
 
