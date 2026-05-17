@@ -18,9 +18,10 @@ export const metadata: Metadata = {
   title: "Curatd",
   icons: {
     icon: [
-      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon.ico", sizes: "48x48" },
       { url: "/icon.png", type: "image/png", sizes: "32x32" },
     ],
+    shortcut: "/favicon.ico",
     apple: [{ url: "/apple-icon.png", type: "image/png", sizes: "180x180" }],
   },
   openGraph: {
