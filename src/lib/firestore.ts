@@ -3,12 +3,39 @@ import {
   getDoc,
   runTransaction,
   serverTimestamp,
+  setDoc,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 
 export const USERNAME_TAKEN = "USERNAME_TAKEN";
 
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
+
+export function profileNeedsLegalName(data: {
+  firstName?: unknown;
+  lastName?: unknown;
+} | null): boolean {
+  const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
+  const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
+  return !firstName || !lastName;
+}
+
+/** Internal-only profile fields — never shown in public UI. */
+export async function saveUserLegalName(
+  uid: string,
+  params: { firstName: string; lastName: string },
+) {
+  const firstName = params.firstName.trim();
+  const lastName = params.lastName.trim();
+  if (!firstName || !lastName) {
+    throw new Error("INVALID_NAME");
+  }
+  await setDoc(
+    doc(db, "users", uid),
+    { firstName, lastName },
+    { merge: true },
+  );
+}
 
 export function validateUsernameFormat(raw: string): { username: string; ok: true } {
   const username = String(raw).trim().toLowerCase();
@@ -45,11 +72,9 @@ function buildEmailBasedCandidate(email: string, fourDigitSuffix: string | null)
 export async function ensureGoogleUserHasUsername(params: {
   uid: string;
   email: string | null;
-  /** Stored privately on users/{uid} — not used for public UI. */
-  googleDisplayName?: string | null;
   photoURL?: string | null;
 }): Promise<string | null> {
-  const { uid, email, googleDisplayName, photoURL } = params;
+  const { uid, email, photoURL } = params;
   if (!email) return null;
 
   const userRef = doc(db, "users", uid);
@@ -60,11 +85,6 @@ export async function ensureGoogleUserHasUsername(params: {
       return u.trim().toLowerCase();
     }
   }
-
-  const privateDisplayName =
-    googleDisplayName != null && String(googleDisplayName).trim() !== ""
-      ? String(googleDisplayName).trim()
-      : null;
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const suffix =
@@ -88,7 +108,6 @@ export async function ensureGoogleUserHasUsername(params: {
         tx.set(hRef, { uid });
         const merge: Record<string, unknown> = {
           username: candidate,
-          displayName: privateDisplayName,
           photoURL: photoURL ?? null,
         };
         if (!uSnap.exists() || (uSnap.data() as { createdAt?: unknown }).createdAt == null) {
@@ -120,15 +139,11 @@ export async function ensureGoogleUserHasUsername(params: {
 export async function registerInitialUsername(
   uid: string,
   raw: string,
-  options?: { googleDisplayName?: string | null; photoURL?: string | null },
+  options?: { photoURL?: string | null },
 ) {
   const { username: normalized } = validateUsernameFormat(raw);
   const userRef = doc(db, "users", uid);
   const handleRef = doc(db, "usernames", normalized);
-  const privateDisplayName =
-    options?.googleDisplayName != null && String(options.googleDisplayName).trim() !== ""
-      ? String(options.googleDisplayName).trim()
-      : null;
 
   await runTransaction(db, async (tx) => {
     const uSnap = await tx.get(userRef);
@@ -145,7 +160,7 @@ export async function registerInitialUsername(
     if (hSnap.exists()) {
       const u = (hSnap.data() as { uid?: string })?.uid;
       if (u && u === uid) {
-        tx.set(userRef, { username: normalized, displayName: privateDisplayName }, { merge: true });
+        tx.set(userRef, { username: normalized }, { merge: true });
         return;
       }
       throw new Error(USERNAME_TAKEN);
@@ -153,7 +168,6 @@ export async function registerInitialUsername(
     tx.set(handleRef, { uid });
     const merge: Record<string, unknown> = {
       username: normalized,
-      displayName: privateDisplayName,
       photoURL: options?.photoURL ?? null,
     };
     if (!uSnap.exists() || (uSnap.data() as { createdAt?: unknown }).createdAt == null) {

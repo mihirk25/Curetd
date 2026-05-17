@@ -6,7 +6,9 @@ import { db } from "../firebase";
 import { useAuth } from "./auth-context";
 import {
   ensureGoogleUserHasUsername,
+  profileNeedsLegalName,
   registerInitialUsername,
+  saveUserLegalName,
 } from "../src/lib/firestore";
 
 const UsernameStateContext = createContext<{
@@ -28,12 +30,18 @@ function validateUsername(raw: string) {
   return { username, ok };
 }
 
+type OnboardingStep = "names" | "username";
+
 export function UsernameSetup({ children }: { children?: React.ReactNode }) {
   const { user } = useAuth();
   const [username, setUsername] = useState<string | null>(null);
+  const [needsNames, setNeedsNames] = useState(false);
   const [checking, setChecking] = useState(false);
 
   const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<OnboardingStep>("names");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [input, setInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,9 +66,12 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
     setError(null);
     setSaving(false);
     setInput("");
+    setFirstName("");
+    setLastName("");
 
     if (!user) {
       setUsername(null);
+      setNeedsNames(false);
       setOpen(false);
       setChecking(false);
       return;
@@ -70,12 +81,17 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
     const unsub = onSnapshot(
       userRef,
       (snap) => {
-        const data = snap.exists() ? (snap.data() as { username?: string }) : null;
-        const v = data?.username && String(data.username).trim() ? String(data.username).toLowerCase() : null;
+        const data = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
+        const v =
+          data?.username && String(data.username).trim()
+            ? String(data.username).toLowerCase()
+            : null;
         setUsername(v);
+        setNeedsNames(profileNeedsLegalName(data));
       },
       () => {
         setUsername(null);
+        setNeedsNames(true);
       },
     );
 
@@ -86,11 +102,10 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
         await ensureGoogleUserHasUsername({
           uid: user.uid,
           email: user.email,
-          googleDisplayName: user.displayName,
           photoURL: user.photoURL,
         });
       } catch {
-        // Firestore rules or offline; snapshot + choose-username flow still apply
+        // Firestore rules or offline; snapshot + onboarding flow still apply
       } finally {
         if (!cancelled) setChecking(false);
       }
@@ -108,19 +123,54 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
       return;
     }
     if (checking) return;
-    if (username) {
-      setOpen(false);
+
+    if (needsNames) {
+      setStep("names");
+      setOpen(true);
       return;
     }
-    setOpen(true);
-  }, [user, username, checking]);
+    if (!username) {
+      setStep("username");
+      setOpen(true);
+      return;
+    }
+    setOpen(false);
+  }, [user, username, needsNames, checking]);
 
   const contextValue = useMemo(
     () => ({ username, refreshUsername }),
     [username, refreshUsername],
   );
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleNamesSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    if (!user) return;
+    const fn = firstName.trim();
+    const ln = lastName.trim();
+    if (!fn || !ln) {
+      setError("Please enter your first and last name.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await saveUserLegalName(user.uid, { firstName: fn, lastName: ln });
+      setNeedsNames(false);
+      if (!username) {
+        setStep("username");
+      } else {
+        setOpen(false);
+      }
+    } catch {
+      setError("Could not save your name. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleUsernameSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
@@ -134,7 +184,6 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
     setSaving(true);
     try {
       await registerInitialUsername(user.uid, normalized, {
-        googleDisplayName: user.displayName,
         photoURL: user.photoURL,
       });
 
@@ -158,7 +207,7 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
     <UsernameStateContext.Provider value={contextValue}>
       {children}
 
-      {open && user && !checking && (
+      {open && user && !checking ? (
         <div
           className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={() => {}}
@@ -167,49 +216,102 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
             className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-8"
             onClick={(ev) => ev.stopPropagation()}
           >
-            <div className="mb-6">
-              <h2 className="text-xl font-bold">Choose a username</h2>
-              <p className="text-zinc-500 text-sm mt-0.5">
-                Pick a unique handle to claim your curator profile.
-              </p>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-1.5 block">
-                  Username
-                </label>
-                <input
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="e.g. mihir_kuvadiya"
-                  className="w-full bg-black border border-zinc-700 p-3.5 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
-                  autoComplete="off"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-                <div className="text-xs text-zinc-500 mt-2">
-                  Lowercase, 3–20 characters, letters/numbers/underscores only.
+            {step === "names" ? (
+              <>
+                <div className="mb-6">
+                  <h2 className="text-xl font-bold">Welcome to Curatd</h2>
+                  <p className="text-zinc-500 text-sm mt-0.5">
+                    Your name is kept private and never shown on your public profile.
+                  </p>
                 </div>
-                {error ? <div className="text-xs text-red-400 mt-2">{error}</div> : null}
-              </div>
 
-              <button
-                type="submit"
-                disabled={saving}
-                className={`w-full font-bold py-4 rounded-xl transition-all text-sm ${
-                  saving
-                    ? "bg-zinc-800 text-zinc-400 cursor-not-allowed"
-                    : "bg-white text-black hover:bg-zinc-200"
-                }`}
-              >
-                {saving ? "Saving..." : "Save username"}
-              </button>
-            </form>
+                <form onSubmit={handleNamesSubmit} className="space-y-4">
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-1.5 block">
+                      First name
+                    </label>
+                    <input
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      placeholder="e.g. Raj"
+                      className="w-full bg-black border border-zinc-700 p-3.5 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
+                      autoComplete="given-name"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-1.5 block">
+                      Last name
+                    </label>
+                    <input
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      placeholder="e.g. Patel"
+                      className="w-full bg-black border border-zinc-700 p-3.5 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
+                      autoComplete="family-name"
+                    />
+                  </div>
+                  {error ? <div className="text-xs text-red-400">{error}</div> : null}
+
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className={`w-full font-bold py-4 rounded-xl transition-all text-sm ${
+                      saving
+                        ? "bg-zinc-800 text-zinc-400 cursor-not-allowed"
+                        : "bg-white text-black hover:bg-zinc-200"
+                    }`}
+                  >
+                    {saving ? "Saving..." : "Continue"}
+                  </button>
+                </form>
+              </>
+            ) : (
+              <>
+                <div className="mb-6">
+                  <h2 className="text-xl font-bold">Choose a username</h2>
+                  <p className="text-zinc-500 text-sm mt-0.5">
+                    This is your public handle — only @username is visible to others.
+                  </p>
+                </div>
+
+                <form onSubmit={handleUsernameSubmit} className="space-y-4">
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mb-1.5 block">
+                      Username
+                    </label>
+                    <input
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      placeholder="e.g. mihir_kuvadiya"
+                      className="w-full bg-black border border-zinc-700 p-3.5 rounded-xl outline-none focus:border-zinc-500 transition-colors text-sm"
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                    <div className="text-xs text-zinc-500 mt-2">
+                      Lowercase, 3–20 characters, letters/numbers/underscores only.
+                    </div>
+                    {error ? <div className="text-xs text-red-400 mt-2">{error}</div> : null}
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className={`w-full font-bold py-4 rounded-xl transition-all text-sm ${
+                      saving
+                        ? "bg-zinc-800 text-zinc-400 cursor-not-allowed"
+                        : "bg-white text-black hover:bg-zinc-200"
+                    }`}
+                  >
+                    {saving ? "Saving..." : "Save username"}
+                  </button>
+                </form>
+              </>
+            )}
           </div>
         </div>
-      )}
+      ) : null}
 
     </UsernameStateContext.Provider>
   );

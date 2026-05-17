@@ -43,7 +43,6 @@ const EXPLORE_TOPICS = [
 type FeaturedCurator = {
   uid: string;
   username: string;
-  displayName: string;
   photoURL: string | null;
   followerCount: number;
 };
@@ -137,14 +136,9 @@ export default function ExplorePage() {
                 followerCount = await getFollowerCount(d.id);
               } catch {}
             }
-            const displayName =
-              typeof data.displayName === "string" && data.displayName.trim()
-                ? data.displayName.trim()
-                : username;
             return {
               uid: d.id,
               username,
-              displayName,
               photoURL: typeof data.photoURL === "string" ? data.photoURL : null,
               followerCount,
             } satisfies FeaturedCurator;
@@ -167,11 +161,7 @@ export default function ExplorePage() {
     if (!q) return { curators: [] as FeaturedCurator[], topics: [] as { name: string; count: number }[] };
 
     const curators = searchableCurators
-      .filter((c) => {
-        const u = c.username.toLowerCase();
-        const d = c.displayName.toLowerCase();
-        return u.includes(q) || d.includes(q);
-      })
+      .filter((c) => c.username.toLowerCase().includes(q))
       .sort((a, b) => b.followerCount - a.followerCount || a.username.localeCompare(b.username))
       .slice(0, 12);
 
@@ -235,14 +225,9 @@ export default function ExplorePage() {
                 followerCount = await getFollowerCount(d.id);
               } catch {}
             }
-            const displayName =
-              typeof data.displayName === "string" && data.displayName.trim()
-                ? data.displayName.trim()
-                : username;
             return {
               uid: d.id,
               username,
-              displayName,
               photoURL: typeof data.photoURL === "string" ? data.photoURL : null,
               followerCount,
             } satisfies FeaturedCurator;
@@ -481,9 +466,6 @@ export default function ExplorePage() {
                           )}
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-sm font-semibold text-white">@{c.username}</div>
-                            {c.displayName !== c.username ? (
-                              <div className="truncate text-xs text-zinc-400">{c.displayName}</div>
-                            ) : null}
                           </div>
                           <div className="shrink-0 text-xs text-zinc-500">
                             {c.followerCount} follower{c.followerCount === 1 ? "" : "s"}
@@ -557,8 +539,7 @@ export default function ExplorePage() {
                             {c.username.slice(0, 1).toUpperCase()}
                           </div>
                         )}
-                        <div className="mt-2 line-clamp-1 text-sm font-semibold text-white">{c.displayName}</div>
-                        <div className="mt-0.5 text-xs text-zinc-400">@{c.username}</div>
+                        <div className="mt-2 line-clamp-1 text-sm font-semibold text-white">@{c.username}</div>
                         <div className="mt-1 text-xs text-zinc-500">
                           {c.followerCount} follower{c.followerCount === 1 ? "" : "s"}
                         </div>

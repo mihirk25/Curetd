@@ -58,24 +58,21 @@ export function NewMessageModal(props: {
     const t = window.setTimeout(() => {
       void (async () => {
         try {
-          // Search in parallel:
-          // - usernames collection (username is doc id)
-          // - users collection by displayName prefix
           const byUsernameQ = query(
             collection(db, "usernames"),
             where(documentId(), ">=", q),
             where(documentId(), "<=", q + "\uf8ff"),
             limit(10),
           );
-          const byNameQ = query(
+          const byUsersQ = query(
             collection(db, "users"),
-            orderBy("displayName"),
-            where("displayName", ">=", raw),
-            where("displayName", "<=", raw + "\uf8ff"),
+            where("username", ">=", q),
+            where("username", "<=", q + "\uf8ff"),
+            orderBy("username"),
             limit(10),
           );
 
-          const [usernamesSnap, usersSnap] = await Promise.all([getDocs(byUsernameQ), getDocs(byNameQ)]);
+          const [usernamesSnap, usersSnap] = await Promise.all([getDocs(byUsernameQ), getDocs(byUsersQ)]);
           if (cancelled) return;
 
           const merged = new Map<string, UsernameHit>();

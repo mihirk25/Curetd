@@ -176,10 +176,7 @@
       typeof data.username === "string" && data.username.trim()
         ? data.username.trim().toLowerCase()
         : null;
-    const displayName =
-      typeof data.displayName === "string" && data.displayName.trim()
-        ? data.displayName.trim()
-        : username;
+    const displayName = username;
     return { username, displayName };
   }
 

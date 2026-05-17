@@ -57,7 +57,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         void ensureGoogleUserHasUsername({
           uid: u.uid,
           email: u.email,
-          googleDisplayName: u.displayName,
           photoURL: u.photoURL,
         }).catch(() => {
           // Rules/network failures are surfaced in UsernameSetup / choose-username flow
