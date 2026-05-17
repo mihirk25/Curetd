@@ -17,12 +17,8 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://curatd.live"),
   title: "Curatd",
   icons: {
-    icon: [
-      { url: "/favicon.ico", sizes: "48x48" },
-      { url: "/icon.png", type: "image/png", sizes: "32x32" },
-    ],
-    shortcut: "/favicon.ico",
-    apple: [{ url: "/apple-icon.png", type: "image/png", sizes: "180x180" }],
+    icon: [{ url: "/brand-icon.png", type: "image/png", sizes: "192x192" }],
+    apple: [{ url: "/brand-icon.png", type: "image/png", sizes: "192x192" }],
   },
   openGraph: {
     title: "Curatd",
@@ -50,6 +46,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        <link rel="icon" href="/brand-icon.png" type="image/png" sizes="192x192" />
         <link
           href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap"
           rel="stylesheet"
