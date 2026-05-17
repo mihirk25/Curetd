@@ -2346,6 +2346,12 @@ export default function CuratdMVP() {
           <CuratorSearchBar />
         </div>
         <div className="flex items-center gap-2 min-w-0 justify-self-end order-2 ml-auto md:order-none md:ml-0" ref={navMenuRef}>
+          <Link
+            href="/explore"
+            className="shrink-0 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-400 transition-colors hover:border-emerald-500/50 hover:bg-emerald-500/20 hover:text-emerald-300"
+          >
+            Explore
+          </Link>
           {user ? (
             <>
               <button
