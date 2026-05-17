@@ -24,8 +24,7 @@ import {
 import { auth, db, storage } from "../../firebase";
 import { useAuth } from "../auth-context";
 import { UsernameSetup } from "../username-setup";
-import { EditUsernameModal } from "../edit-username-control";
-import { SettingsModal } from "../components/settings-modal";
+import { UserNavMenu } from "../components/user-nav-menu";
 import { CuratorSearchBar } from "../curator-search-bar";
 import { SignInCuratorModal } from "../sign-in-curator-modal";
 import { CuratorRequiredModal } from "../curator-required-modal";
@@ -121,11 +120,7 @@ export default function PublicProfilePage() {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
   const [navMenuOpen, setNavMenuOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [editUsernameOpen, setEditUsernameOpen] = useState(false);
   const navMenuRef = useRef<HTMLDivElement | null>(null);
-  const navPhotoInputRef = useRef<HTMLInputElement | null>(null);
-  const [navUploadingPhoto, setNavUploadingPhoto] = useState(false);
   const [navPhotoUrl, setNavPhotoUrl] = useState<string | null>(null);
 
   const [collections, setCollections] = useState<Array<{ id: string } & Record<string, unknown>>>([]);
@@ -415,41 +410,6 @@ export default function PublicProfilePage() {
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [navMenuOpen]);
 
-  const uploadNavPhoto = useCallback(
-    async (file: File) => {
-      const allowed = ["image/jpeg", "image/png", "image/webp"];
-      if (!allowed.includes(file.type)) {
-        alert("Please choose a JPG, PNG, or WebP image.");
-        return;
-      }
-      if (file.size > 2 * 1024 * 1024) {
-        alert("Image must be under 2MB");
-        return;
-      }
-      if (!user) return;
-
-      setNavUploadingPhoto(true);
-      try {
-        const storageRef = ref(storage, `profilePhotos/${user.uid}`);
-        await uploadBytes(storageRef, file, { contentType: file.type });
-        const url = await getDownloadURL(storageRef);
-        await updateDoc(doc(db, "users", user.uid), { photoURL: url });
-        if (auth.currentUser) {
-          await updateProfile(auth.currentUser, { photoURL: url });
-        }
-        setNavPhotoUrl(url);
-        setNavMenuOpen(false);
-        setSettingsOpen(false);
-      } catch (e) {
-        console.error(e);
-        alert("Could not upload photo. Please try again.");
-      } finally {
-        setNavUploadingPhoto(false);
-      }
-    },
-    [user],
-  );
-
   const handleAvatarFileSelected = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -489,24 +449,6 @@ export default function PublicProfilePage() {
   return (
     <div className="min-h-screen bg-black text-white font-sans flex flex-col">
       <UsernameSetup />
-      {user ? (
-        <>
-          <EditUsernameModal
-            open={editUsernameOpen}
-            onOpenChange={setEditUsernameOpen}
-            currentUsername={myUsername ?? ""}
-          />
-          <SettingsModal
-            open={settingsOpen}
-            onClose={() => setSettingsOpen(false)}
-            profileHref={myUsername ? `/${myUsername}` : "/"}
-            uploadingPhoto={navUploadingPhoto}
-            onChangePhoto={() => navPhotoInputRef.current?.click()}
-            onEditUsername={() => setEditUsernameOpen(true)}
-            onSignOut={() => void handleSignOut()}
-          />
-        </>
-      ) : null}
       <header className="shrink-0 h-14 border-b border-zinc-800 grid grid-cols-[minmax(0,auto)_1fr_minmax(0,auto)] items-center gap-4 px-4 bg-black">
         <Link href="/" className="text-sm font-bold tracking-tight text-white hover:text-zinc-200 transition-colors shrink-0">
           CURATD
@@ -514,7 +456,7 @@ export default function PublicProfilePage() {
         <div className="flex min-w-0 justify-center px-2">
           <CuratorSearchBar />
         </div>
-        <div className="flex items-center gap-2 min-w-0 justify-self-end" ref={navMenuRef}>
+        <div className="relative flex items-center gap-2 min-w-0 justify-self-end" ref={navMenuRef}>
           {user ? (
             <>
               <button
@@ -546,21 +488,10 @@ export default function PublicProfilePage() {
                   </span>
                 ) : null}
               </button>
-              <input
-                ref={navPhotoInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  e.target.value = "";
-                  if (f) void uploadNavPhoto(f);
-                }}
-              />
               <button
                 type="button"
                 onClick={() => setNavMenuOpen((v) => !v)}
-                className="flex items-center gap-2 min-w-0 rounded-xl px-2 py-1.5 hover:bg-zinc-900/80 transition-colors"
+                className="relative flex items-center gap-2 min-w-0 rounded-xl px-2 py-1.5 hover:bg-zinc-900/80 transition-colors"
                 title={myUsername ? `@${myUsername}` : "Setting up..."}
               >
                 {navPhotoUrl ? (
@@ -579,21 +510,11 @@ export default function PublicProfilePage() {
                 </span>
               </button>
 
-              {navMenuOpen ? (
-                <div className="absolute right-4 top-14 z-[80] w-56 rounded-lg border border-zinc-700 bg-zinc-900 shadow-lg p-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSettingsOpen(true);
-                      setNavMenuOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800/70"
-                  >
-                    <span className="text-zinc-400" aria-hidden>⚙</span>
-                    Settings
-                  </button>
-                </div>
-              ) : null}
+              <UserNavMenu
+                open={navMenuOpen}
+                onClose={() => setNavMenuOpen(false)}
+                onSignOut={() => void handleSignOut()}
+              />
             </>
           ) : (
             <>
