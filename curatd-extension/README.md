@@ -28,7 +28,14 @@ Chrome extension to save YouTube clips directly to your Curatd Firestore account
 ## Requirements
 
 - Be signed in at **curatd.live** in the same Chrome profile.
-- If the popup says “Please sign in at curatd.live first”, open the site, sign in, then click the extension icon again.
+- If the popup says “Please sign in at curatd.live first”, open the site, sign in, wait a moment (the bridge syncs automatically), then click the extension icon again.
+
+## How auth sync works
+
+1. You visit **curatd.live** while signed in.
+2. `curatd-bridge.js` reads `firebase:authUser:…` from `localStorage` and sends it to the background worker.
+3. The background stores the session in `chrome.storage.local`.
+4. The popup and clip saves use that stored session.
 
 ## File structure
 
@@ -37,8 +44,8 @@ curatd-extension/
   manifest.json       Manifest V3
   popup.html / popup.js   Session status UI
   content.js          Injected on YouTube watch pages
-  curatd-site.js      Reads auth from curatd.live localStorage
-  curatd-auth.js      Cookie + site session reader
+  curatd-bridge.js    Syncs Firebase auth from curatd.live localStorage
+  curatd-auth.js      Reads session from chrome.storage.local
   background.js       Service worker (session + Firestore writes)
   styles.css          Injected UI styles
   firebase-config.js  Firebase project config (API key, project ID)

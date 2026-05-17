@@ -100,12 +100,13 @@
     if (typeof CuratdAuth === "undefined") {
       throw new Error("CuratdAuth is not loaded.");
     }
-    let session = await CuratdAuth.getCuratdLiveSession();
+    let session = await CuratdAuth.getStoredSession();
     if (!session?.idToken) return null;
     if (session.expiresAt > Date.now() + 60_000) return session;
     if (!session.refreshToken) return null;
     try {
       session = await refreshSession(session);
+      await CuratdAuth.saveSession(session);
       return session;
     } catch {
       return null;

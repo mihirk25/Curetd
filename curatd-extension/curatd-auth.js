@@ -1,159 +1,52 @@
 /**
- * Read Firebase Auth session from curatd.live (cookies + site localStorage).
+ * Auth session stored in chrome.storage.local by curatd-bridge.js on curatd.live.
  */
 (function (globalScope) {
-  const CURATD_ORIGIN = "https://curatd.live";
-  const CURATD_URL = `${CURATD_ORIGIN}/`;
+  const STORAGE_KEY = "curatdSession";
 
-  function cfg() {
-    if (typeof FIREBASE_CONFIG === "undefined") {
-      throw new Error("FIREBASE_CONFIG is not defined.");
-    }
-    return FIREBASE_CONFIG;
-  }
-
-  /** @param {unknown} data */
-  function parseFirebaseAuthUser(data) {
-    if (!data || typeof data !== "object") return null;
-    const u = /** @type {Record<string, unknown>} */ (data);
-    const tm = u.stsTokenManager;
-    if (!tm || typeof tm !== "object") return null;
-    const tokenMgr = /** @type {Record<string, unknown>} */ (tm);
-    const idToken =
-      typeof tokenMgr.accessToken === "string" ? tokenMgr.accessToken : "";
-    if (!idToken) return null;
-    const refreshToken =
-      typeof tokenMgr.refreshToken === "string" ? tokenMgr.refreshToken : "";
-    const expiresAt = Number(tokenMgr.expirationTime) || 0;
-    const uid = typeof u.uid === "string" ? u.uid : "";
-    const email = typeof u.email === "string" ? u.email : "";
-    if (!uid) return null;
-    return { uid, email, idToken, refreshToken, expiresAt };
-  }
-
-  /** @param {string} raw */
-  function parseAuthJson(raw) {
-    if (!raw) return null;
-    try {
-      return parseFirebaseAuthUser(JSON.parse(raw));
-    } catch {
-      try {
-        return parseFirebaseAuthUser(JSON.parse(decodeURIComponent(raw)));
-      } catch {
-        return null;
-      }
-    }
-  }
-
-  function readAuthFromStorageInPage(apiKey) {
-    function parse(raw) {
-      if (!raw) return null;
-      try {
-        const data = JSON.parse(raw);
-        const tm = data?.stsTokenManager;
-        if (!tm?.accessToken || !data?.uid) return null;
-        return {
-          uid: data.uid,
-          email: data.email || "",
-          idToken: tm.accessToken,
-          refreshToken: tm.refreshToken || "",
-          expiresAt: Number(tm.expirationTime) || 0,
-        };
-      } catch {
-        return null;
-      }
-    }
-    if (apiKey) {
-      const exact = localStorage.getItem(`firebase:authUser:${apiKey}:[DEFAULT]`);
-      const fromExact = parse(exact);
-      if (fromExact) return fromExact;
-    }
-    const prefix = "firebase:authUser:";
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key || !key.startsWith(prefix)) continue;
-      const session = parse(localStorage.getItem(key));
-      if (session) return session;
-    }
-    return null;
-  }
-
-  function getAllCookies() {
+  function storageGet(keys) {
     return new Promise((resolve) => {
-      chrome.cookies.getAll({ url: CURATD_URL }, resolve);
+      chrome.storage.local.get(keys, resolve);
     });
   }
 
-  function queryCuratdTabs() {
+  function storageSet(data) {
     return new Promise((resolve) => {
-      chrome.tabs.query({ url: `${CURATD_ORIGIN}/*` }, resolve);
+      chrome.storage.local.set(data, resolve);
     });
   }
 
-  async function readAuthFromCookies() {
-    const cookies = await getAllCookies();
-    for (const cookie of cookies) {
-      if (
-        cookie.name.startsWith("firebase:authUser:") ||
-        cookie.name.includes("firebase") ||
-        cookie.name === "__session"
-      ) {
-        const session = parseAuthJson(cookie.value);
-        if (session) return session;
-      }
-    }
-    return null;
+  function storageRemove(keys) {
+    return new Promise((resolve) => {
+      chrome.storage.local.remove(keys, resolve);
+    });
   }
 
-  async function readAuthFromOpenTab() {
-    const tabs = await queryCuratdTabs();
-    for (const tab of tabs) {
-      if (!tab.id) continue;
-      try {
-        const response = await chrome.tabs.sendMessage(tab.id, { type: "GET_CURATD_AUTH" });
-        if (response?.session) return response.session;
-      } catch {
-        /* content script may not be loaded yet */
-      }
-    }
-    return null;
-  }
-
-  async function readAuthViaScripting() {
-    const tabs = await queryCuratdTabs();
-    if (!tabs.length) return null;
-    const tabId = tabs[0].id;
-    if (!tabId) return null;
-    try {
-      const { apiKey } = cfg();
-      const results = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: readAuthFromStorageInPage,
-        args: [apiKey],
-      });
-      return results?.[0]?.result || null;
-    } catch {
+  async function saveSession(session) {
+    if (!session?.idToken) {
+      await storageRemove([STORAGE_KEY, "user"]);
       return null;
     }
+    await storageSet({
+      [STORAGE_KEY]: session,
+      user: { uid: session.uid, email: session.email || "" },
+    });
+    return session;
   }
 
-  async function getCuratdLiveSession() {
-    const fromCookies = await readAuthFromCookies();
-    if (fromCookies) return fromCookies;
+  async function getStoredSession() {
+    const result = await storageGet([STORAGE_KEY]);
+    return result[STORAGE_KEY] || null;
+  }
 
-    const fromTab = await readAuthFromOpenTab();
-    if (fromTab) return fromTab;
-
-    const fromScript = await readAuthViaScripting();
-    if (fromScript) return fromScript;
-
-    return null;
+  async function clearSession() {
+    await storageRemove([STORAGE_KEY, "user"]);
   }
 
   globalScope.CuratdAuth = {
-    CURATD_ORIGIN,
-    CURATD_URL,
-    getCuratdLiveSession,
-    parseFirebaseAuthUser,
+    STORAGE_KEY,
+    saveSession,
+    getStoredSession,
+    clearSession,
   };
 })(typeof globalThis !== "undefined" ? globalThis : self);
