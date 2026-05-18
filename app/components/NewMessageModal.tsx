@@ -65,7 +65,7 @@ export function NewMessageModal(props: {
             limit(10),
           );
           const byUsersQ = query(
-            collection(db, "users"),
+            collection(db, "publicProfiles"),
             where("username", ">=", q),
             where("username", "<=", q + "\uf8ff"),
             orderBy("username"),

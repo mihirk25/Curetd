@@ -468,7 +468,7 @@ export function MessagesClient() {
             return;
           }
           try {
-            const snap = await getDoc(doc(db, "users", uid));
+            const snap = await getDoc(doc(db, "publicProfiles", uid));
             const d = snap.exists() ? (snap.data() as any) : null;
             const pic = d?.photoURL ?? d?.profilePhoto ?? null;
             next[uid] = {

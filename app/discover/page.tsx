@@ -94,7 +94,7 @@ export default function DiscoverPage() {
         for (const uid of userIds) {
           if (currentUid && uid === currentUid) continue;
           try {
-            const uSnap = await getDoc(doc(db, "users", uid));
+            const uSnap = await getDoc(doc(db, "publicProfiles", uid));
             if (!uSnap.exists()) continue;
             const data = uSnap.data() as any;
             const username = normalizeUsername(data?.username);

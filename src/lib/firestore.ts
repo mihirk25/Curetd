@@ -15,6 +15,48 @@ import { db } from "../../firebase";
 export const USERNAME_TAKEN = "USERNAME_TAKEN";
 
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
+const PUBLIC_PROFILE_COLLECTION = "publicProfiles";
+
+function normalizeProfileTopics(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((t): t is string => typeof t === "string").slice(0, 20);
+}
+
+function safePublicProfileFields(data: {
+  username?: unknown;
+  photoURL?: unknown;
+  profileTopics?: unknown;
+}) {
+  const out: Record<string, unknown> = {};
+  if (typeof data.username === "string" && data.username.trim()) {
+    out.username = data.username.trim().toLowerCase();
+  }
+  if (typeof data.photoURL === "string" && data.photoURL.trim()) {
+    out.photoURL = data.photoURL.trim();
+  } else if ("photoURL" in data) {
+    out.photoURL = null;
+  }
+  const topics = normalizeProfileTopics(data.profileTopics);
+  if (topics) out.profileTopics = topics;
+  return out;
+}
+
+export async function syncPublicProfile(
+  uid: string,
+  data: {
+    username?: unknown;
+    photoURL?: unknown;
+    profileTopics?: unknown;
+    createdAt?: unknown;
+  },
+): Promise<void> {
+  const fields = safePublicProfileFields(data);
+  if ("createdAt" in data && data.createdAt != null) {
+    fields.createdAt = data.createdAt;
+  }
+  if (Object.keys(fields).length === 0) return;
+  await setDoc(doc(db, PUBLIC_PROFILE_COLLECTION, uid), fields, { merge: true });
+}
 
 export function profileNeedsLegalName(data: {
   firstName?: unknown;
@@ -109,9 +151,16 @@ export async function ensureGoogleUserHasUsername(params: {
   const userRef = doc(db, "users", uid);
   const pre = await getDoc(userRef);
   if (pre.exists()) {
-    const u = (pre.data() as { username?: string }).username;
+    const data = pre.data() as { username?: string; photoURL?: unknown; profileTopics?: unknown };
+    const u = data.username;
     if (typeof u === "string" && u.trim()) {
-      return u.trim().toLowerCase();
+      const username = u.trim().toLowerCase();
+      await syncPublicProfile(uid, {
+        username,
+        photoURL: data.photoURL ?? photoURL ?? null,
+        profileTopics: data.profileTopics,
+      });
+      return username;
     }
   }
 
@@ -143,6 +192,7 @@ export async function ensureGoogleUserHasUsername(params: {
           merge.createdAt = serverTimestamp();
         }
         tx.set(userRef, merge, { merge: true });
+        tx.set(doc(db, PUBLIC_PROFILE_COLLECTION, uid), merge, { merge: true });
       });
     } catch (e: unknown) {
       const msg = e && typeof e === "object" && "message" in e ? String((e as { message: string }).message) : "";
@@ -190,6 +240,7 @@ export async function registerInitialUsername(
       const u = (hSnap.data() as { uid?: string })?.uid;
       if (u && u === uid) {
         tx.set(userRef, { username: normalized }, { merge: true });
+        tx.set(doc(db, PUBLIC_PROFILE_COLLECTION, uid), { username: normalized }, { merge: true });
         return;
       }
       throw new Error(USERNAME_TAKEN);
@@ -203,6 +254,7 @@ export async function registerInitialUsername(
       merge.createdAt = serverTimestamp();
     }
     tx.set(userRef, merge, { merge: true });
+    tx.set(doc(db, PUBLIC_PROFILE_COLLECTION, uid), merge, { merge: true });
   });
 }
 
@@ -249,6 +301,7 @@ export async function changeUsername(uid: string, raw: string) {
       }
 
       tx.update(userRef, { username: normalized });
+      tx.set(doc(db, PUBLIC_PROFILE_COLLECTION, uid), { username: normalized }, { merge: true });
     });
   } catch (error) {
     console.error("changeUsername transaction failed:", error);

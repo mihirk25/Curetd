@@ -119,7 +119,7 @@ export default function ExplorePage() {
     let cancelled = false;
     (async () => {
       try {
-        const snap = await getDocs(query(collection(db, "users"), orderBy("username"), limit(120)));
+        const snap = await getDocs(query(collection(db, "publicProfiles"), orderBy("username"), limit(120)));
         if (cancelled) return;
         const rows = await Promise.all(
           snap.docs.map(async (d) => {
@@ -202,11 +202,11 @@ export default function ExplorePage() {
         let snap;
         try {
           snap = await getDocs(
-            query(collection(db, "users"), orderBy("followerCount", "desc"), limit(10)),
+            query(collection(db, "publicProfiles"), orderBy("followerCount", "desc"), limit(10)),
           );
         } catch {
           snap = await getDocs(
-            query(collection(db, "users"), orderBy("createdAt", "desc"), limit(10)),
+            query(collection(db, "publicProfiles"), orderBy("createdAt", "desc"), limit(10)),
           );
         }
         if (cancelled) return;

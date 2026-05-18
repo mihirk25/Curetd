@@ -1,6 +1,20 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function publicProfileHasOnlySafeFields() {
+      return request.resource.data.keys().hasOnly([
+        'username',
+        'photoURL',
+        'profileTopics',
+        'createdAt',
+        'followerCount'
+      ]);
+    }
+
     // Unique handles: public read; create/delete when the authenticated user matches { uid }.
     match /usernames/{uname} {
       allow read: if true;
@@ -13,8 +27,13 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
+      allow read, create, update: if isOwner(userId);
+      allow delete: if false;
+    }
+
+    match /publicProfiles/{userId} {
       allow read: if true;
-      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if isOwner(userId) && publicProfileHasOnlySafeFields();
       allow delete: if false;
     }
 
