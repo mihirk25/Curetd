@@ -1,6 +1,14 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isSignedInAs(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function hasNoPrivateProfileFields() {
+      return !request.resource.data.keys().hasAny(['firstName', 'lastName']);
+    }
+
     // Unique handles: public read; create/delete when the authenticated user matches { uid }.
     match /usernames/{uname} {
       allow read: if true;
@@ -14,7 +22,16 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if true;
-      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if isSignedInAs(userId) && hasNoPrivateProfileFields();
+      allow delete: if false;
+    }
+
+    match /privateUsers/{userId} {
+      allow read: if isSignedInAs(userId);
+      allow create, update: if isSignedInAs(userId)
+        && request.resource.data.keys().hasOnly(['firstName', 'lastName', 'updatedAt'])
+        && request.resource.data.firstName is string
+        && request.resource.data.lastName is string;
       allow delete: if false;
     }
 
