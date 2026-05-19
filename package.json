@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-curatd-rules \"node scripts/test-firestore-rules.mjs\"",
     "generate:og": "node scripts/generate-og-image.mjs",
     "generate:favicons": "node scripts/generate-favicons.mjs"
   },
@@ -19,6 +20,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
