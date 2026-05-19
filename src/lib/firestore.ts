@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -9,12 +10,14 @@ import {
   serverTimestamp,
   setDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 
 export const USERNAME_TAKEN = "USERNAME_TAKEN";
 
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
+export const PRIVATE_USERS_COLLECTION = "privateUsers";
 
 export function profileNeedsLegalName(data: {
   firstName?: unknown;
@@ -59,11 +62,36 @@ export async function saveUserLegalName(
   if (!firstName || !lastName) {
     throw new Error("INVALID_NAME");
   }
-  await setDoc(
-    doc(db, "users", uid),
-    { firstName, lastName },
+  const batch = writeBatch(db);
+  batch.set(
+    doc(db, PRIVATE_USERS_COLLECTION, uid),
+    { firstName, lastName, updatedAt: serverTimestamp() },
     { merge: true },
   );
+  batch.set(
+    doc(db, "users", uid),
+    { firstName: deleteField(), lastName: deleteField() },
+    { merge: true },
+  );
+  await batch.commit();
+}
+
+function readLegacyLegalName(data: { firstName?: unknown; lastName?: unknown } | null): {
+  firstName: string;
+  lastName: string;
+} | null {
+  const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
+  const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
+  return firstName && lastName ? { firstName, lastName } : null;
+}
+
+export async function migrateLegacyLegalName(
+  uid: string,
+  data: { firstName?: unknown; lastName?: unknown } | null,
+): Promise<void> {
+  const legacyName = readLegacyLegalName(data);
+  if (!legacyName) return;
+  await saveUserLegalName(uid, legacyName);
 }
 
 export function validateUsernameFormat(raw: string): { username: string; ok: true } {
@@ -109,6 +137,10 @@ export async function ensureGoogleUserHasUsername(params: {
   const userRef = doc(db, "users", uid);
   const pre = await getDoc(userRef);
   if (pre.exists()) {
+    await migrateLegacyLegalName(
+      uid,
+      pre.data() as { firstName?: unknown; lastName?: unknown },
+    );
     const u = (pre.data() as { username?: string }).username;
     if (typeof u === "string" && u.trim()) {
       return u.trim().toLowerCase();
