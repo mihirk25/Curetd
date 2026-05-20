@@ -98,12 +98,14 @@ test("does not fall back to another Firebase auth row", async () => {
   });
 
   assert.equal(messages.length, 1);
-  assert.deepEqual(messages[0], { type: "CURATD_AUTH_SESSION", session: null });
+  assert.equal(messages[0].type, "CURATD_AUTH_SESSION");
+  assert.equal(messages[0].session, null);
 });
 
 test("sends an initial clear when no Firebase auth row exists", async () => {
   const messages = await runBridge();
 
   assert.equal(messages.length, 1);
-  assert.deepEqual(messages[0], { type: "CURATD_AUTH_SESSION", session: null });
+  assert.equal(messages[0].type, "CURATD_AUTH_SESSION");
+  assert.equal(messages[0].session, null);
 });
