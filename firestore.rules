@@ -14,8 +14,14 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if true;
-      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if request.auth != null
+        && request.auth.uid == userId
+        && !request.resource.data.keys().hasAny(['firstName', 'lastName']);
       allow delete: if false;
+
+      match /private/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
     }
 
     match /clips/{clipId} {

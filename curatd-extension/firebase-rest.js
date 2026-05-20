@@ -289,7 +289,7 @@
 
     if (existing) {
       const moments = Array.isArray(existing.data.moments) ? [...existing.data.moments] : [];
-      moments.push(moment);
+      moments.unshift(moment);
       await patchClip(existing.id, {
         title: videoTitle,
         channelName,
