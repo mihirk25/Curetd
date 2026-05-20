@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -9,12 +10,17 @@ import {
   serverTimestamp,
   setDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 
 export const USERNAME_TAKEN = "USERNAME_TAKEN";
 
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
+
+export function userPrivateProfileRef(uid: string) {
+  return doc(db, "users", uid, "private", "profile");
+}
 
 export function profileNeedsLegalName(data: {
   firstName?: unknown;
@@ -59,11 +65,18 @@ export async function saveUserLegalName(
   if (!firstName || !lastName) {
     throw new Error("INVALID_NAME");
   }
-  await setDoc(
-    doc(db, "users", uid),
-    { firstName, lastName },
+  const batch = writeBatch(db);
+  batch.set(
+    userPrivateProfileRef(uid),
+    { firstName, lastName, updatedAt: serverTimestamp() },
     { merge: true },
   );
+  batch.set(
+    doc(db, "users", uid),
+    { firstName: deleteField(), lastName: deleteField() },
+    { merge: true },
+  );
+  await batch.commit();
 }
 
 export function validateUsernameFormat(raw: string): { username: string; ok: true } {

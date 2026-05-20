@@ -103,12 +103,16 @@
     let session = await CuratdAuth.getStoredSession();
     if (!session?.idToken) return null;
     if (session.expiresAt > Date.now() + 60_000) return session;
-    if (!session.refreshToken) return null;
+    if (!session.refreshToken) {
+      await CuratdAuth.clearSession();
+      return null;
+    }
     try {
       session = await refreshSession(session);
       await CuratdAuth.saveSession(session);
       return session;
     } catch {
+      await CuratdAuth.clearSession();
       return null;
     }
   }

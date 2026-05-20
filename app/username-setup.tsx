@@ -9,6 +9,7 @@ import {
   profileNeedsLegalName,
   registerInitialUsername,
   saveUserLegalName,
+  userPrivateProfileRef,
 } from "../src/lib/firestore";
 
 const UsernameStateContext = createContext<{
@@ -78,7 +79,7 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
     }
 
     const userRef = doc(db, "users", user.uid);
-    const unsub = onSnapshot(
+    const unsubUser = onSnapshot(
       userRef,
       (snap) => {
         const data = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
@@ -87,11 +88,28 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
             ? String(data.username).toLowerCase()
             : null;
         setUsername(v);
+        const legacyFirstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
+        const legacyLastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
+        if (legacyFirstName && legacyLastName) {
+          void saveUserLegalName(user.uid, {
+            firstName: legacyFirstName,
+            lastName: legacyLastName,
+          }).catch(() => {});
+        }
+      },
+      (err) => {
+        console.error("users/{uid} snapshot error:", err);
+      },
+    );
+
+    const unsubPrivate = onSnapshot(
+      userPrivateProfileRef(user.uid),
+      (snap) => {
+        const data = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
         setNeedsNames(profileNeedsLegalName(data));
       },
-      () => {
-        setUsername(null);
-        setNeedsNames(true);
+      (err) => {
+        console.error("users/{uid}/private/profile snapshot error:", err);
       },
     );
 
@@ -113,7 +131,8 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
 
     return () => {
       cancelled = true;
-      unsub();
+      unsubUser();
+      unsubPrivate();
     };
   }, [user?.uid]);
 

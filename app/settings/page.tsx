@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { useAuth } from "../auth-context";
 import { UsernameSetup, useUsername } from "../username-setup";
 import { EditUsernameModal } from "../edit-username-control";
@@ -67,19 +67,14 @@ function SettingsRowLink({
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { user, signOut } = useAuth();
+  const { user, loading, signOut } = useAuth();
   const username = useUsername();
   const unreadCount = useUnreadMessageCount(user?.uid);
   const supportsExtension = useSupportsChromeExtension();
 
-  const [showAuthModal, setShowAuthModal] = useState(false);
   const [editUsernameOpen, setEditUsernameOpen] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (!user) setShowAuthModal(true);
-  }, [user]);
 
   const handlePhotoSelected = useCallback(
     async (file: File) => {
@@ -238,7 +233,7 @@ export default function SettingsPage() {
         )}
       </main>
 
-      <SignInCuratorModal open={showAuthModal} onClose={() => router.push("/")} />
+      <SignInCuratorModal open={!loading && !user} onClose={() => router.push("/")} />
     </div>
   );
 }
