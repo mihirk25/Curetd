@@ -1,6 +1,14 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function hasNoLegalNameFields() {
+      return !request.resource.data.keys().hasAny(['firstName', 'lastName']);
+    }
+
     // Unique handles: public read; create/delete when the authenticated user matches { uid }.
     match /usernames/{uname} {
       allow read: if true;
@@ -14,8 +22,12 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if true;
-      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if isOwner(userId) && hasNoLegalNameFields();
       allow delete: if false;
+
+      match /private/{docId} {
+        allow read, write: if isOwner(userId);
+      }
     }
 
     match /clips/{clipId} {
