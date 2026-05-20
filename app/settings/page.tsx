@@ -67,7 +67,7 @@ function SettingsRowLink({
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { user, signOut } = useAuth();
+  const { user, loading, signOut } = useAuth();
   const username = useUsername();
   const unreadCount = useUnreadMessageCount(user?.uid);
   const supportsExtension = useSupportsChromeExtension();
@@ -78,8 +78,9 @@ export default function SettingsPage() {
   const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    if (!user) setShowAuthModal(true);
-  }, [user]);
+    if (loading) return;
+    setShowAuthModal(!user);
+  }, [user, loading]);
 
   const handlePhotoSelected = useCallback(
     async (file: File) => {
