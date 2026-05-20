@@ -3,7 +3,7 @@
   "name": "Curatd Clipper",
   "version": "1.2.0",
   "description": "Save YouTube clips to your Curatd account",
-  "permissions": ["storage", "activeTab", "scripting"],
+  "permissions": ["storage", "activeTab"],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://curatd.live/*",
