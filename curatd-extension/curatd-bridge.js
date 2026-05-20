@@ -6,7 +6,7 @@
   const STORE_NAME = "firebaseLocalStorage";
   const AUTH_KEY = `firebase:authUser:${FIREBASE_CONFIG.apiKey}:[DEFAULT]`;
 
-  let lastPayload = "";
+  let lastPayload = null;
 
   function openDb() {
     return new Promise((resolve, reject) => {
@@ -97,17 +97,6 @@
             ? row.fbase_key || row.key || null
             : null;
         if (rowKey === AUTH_KEY) {
-          const session = parseAuthEntry(row);
-          if (session) return session;
-        }
-      }
-
-      for (const row of rows) {
-        const rowKey =
-          row && typeof row === "object"
-            ? row.fbase_key || row.key || null
-            : null;
-        if (rowKey && String(rowKey).startsWith("firebase:authUser:")) {
           const session = parseAuthEntry(row);
           if (session) return session;
         }

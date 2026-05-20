@@ -5,8 +5,6 @@ const userLabel = document.getElementById("user-label");
 const openCuratdBtn = document.getElementById("open-curatd-btn");
 
 const CURATD_URL = "https://curatd.live";
-const STORAGE_KEY = "curatdSession";
-
 function showState(name) {
   stateLoading.classList.remove("visible");
   stateLoggedIn.classList.remove("visible");
@@ -34,24 +32,11 @@ function setLoggedOut() {
   showState("logged-out");
 }
 
-function getStoredSession() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get([STORAGE_KEY], (result) => {
-      resolve(result[STORAGE_KEY] || null);
-    });
-  });
-}
-
 async function checkSession() {
   showState("loading");
   try {
-    let session = await getStoredSession();
-
-    // Refresh token via background if stored session is expired
-    if (session?.idToken && session.expiresAt <= Date.now() + 60_000) {
-      const response = await chrome.runtime.sendMessage({ type: "GET_CURATD_SESSION" });
-      session = response?.session || null;
-    }
+    const response = await chrome.runtime.sendMessage({ type: "GET_CURATD_SESSION" });
+    const session = response?.session || null;
 
     if (session?.idToken) {
       setLoggedIn(session);
