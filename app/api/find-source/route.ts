@@ -84,7 +84,7 @@ function coerceResponse(raw: unknown): FindSourceResponse {
         url: typeof rec.url === "string" ? rec.url : "",
         title: typeof rec.title === "string" ? rec.title : "",
       };
-    }))
+    })
     .filter((r: { url: string; title: string }) => r.url && r.title)
     .slice(0, 5);
 
