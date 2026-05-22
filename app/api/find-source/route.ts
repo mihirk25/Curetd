@@ -10,6 +10,10 @@ type FindSourceResponse = {
   verificationFailed?: boolean;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function buildPrompt(shortUrl: string) {
   return `You are helping find the original long-form source of a YouTube Short.
 
@@ -43,7 +47,7 @@ Return your response as JSON only in this format:
 `;
 }
 
-function extractJson(text: string): any {
+function extractJson(text: string): unknown {
   const t = String(text || "").trim();
   const noFences = t.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
   const first = noFences.indexOf("{");
@@ -55,14 +59,14 @@ function extractJson(text: string): any {
   return JSON.parse(jsonText);
 }
 
-function coerceResponse(raw: any): FindSourceResponse {
-  const transcript = typeof raw?.transcript === "string" ? raw.transcript : "";
-  const found = Boolean(raw?.found);
+function coerceResponse(raw: unknown): FindSourceResponse {
+  const record = isRecord(raw) ? raw : {};
+  const transcript = typeof record.transcript === "string" ? record.transcript : "";
+  const found = Boolean(record.found);
 
-  const exactRaw = raw?.exact;
+  const exactRaw = record.exact;
   const exact =
-    exactRaw &&
-    typeof exactRaw === "object" &&
+    isRecord(exactRaw) &&
     typeof exactRaw.url === "string" &&
     typeof exactRaw.title === "string"
       ? {
@@ -72,11 +76,14 @@ function coerceResponse(raw: any): FindSourceResponse {
         }
       : null;
 
-  const recsRaw = Array.isArray(raw?.recommendations) ? raw.recommendations : [];
+  const recsRaw = Array.isArray(record.recommendations) ? record.recommendations : [];
   const recommendations = recsRaw
-    .map((r: any) => ({
-      url: typeof r?.url === "string" ? r.url : "",
-      title: typeof r?.title === "string" ? r.title : "",
+    .map((r: unknown) => {
+      const rec = isRecord(r) ? r : {};
+      return {
+        url: typeof rec.url === "string" ? rec.url : "",
+        title: typeof rec.title === "string" ? rec.title : "",
+      };
     }))
     .filter((r: { url: string; title: string }) => r.url && r.title)
     .slice(0, 5);
@@ -175,8 +182,8 @@ export async function POST(req: Request) {
     await clipRef.set({ sourceData }, { merge: true });
 
     return NextResponse.json(sourceData);
-  } catch (e: any) {
-    const message = e && typeof e === "object" && "message" in e ? String(e.message) : "Unknown error";
+  } catch (e: unknown) {
+    const message = isRecord(e) && typeof e.message === "string" ? e.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
