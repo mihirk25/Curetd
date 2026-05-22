@@ -3632,7 +3632,13 @@ export default function CuratdMVP() {
                             type="button"
                             onClick={() => {
                               if (!vid) return;
-                              window.open(`https://www.youtube.com/watch?v=${vid}&t=${clip.startTime || 0}s`, '_blank');
+                              const watchStart =
+                                typeof primaryMoment?.startTime === "number"
+                                  ? primaryMoment.startTime
+                                  : typeof clip?.startTime === "number"
+                                    ? clip.startTime
+                                    : 0;
+                              window.open(`https://www.youtube.com/watch?v=${vid}&t=${watchStart}s`, '_blank');
                             }}
                             className="text-xs font-semibold text-emerald-500 hover:text-emerald-400 transition-colors"
                           >
