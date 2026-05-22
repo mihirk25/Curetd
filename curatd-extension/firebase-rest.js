@@ -245,8 +245,8 @@
     return docIdFromName(doc.name);
   }
 
-  async function patchClip(docId, fields) {
-    const mask = Object.keys(fields)
+  async function patchClip(docId, fields, deleteFieldNames = []) {
+    const mask = [...Object.keys(fields), ...deleteFieldNames]
       .map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`)
       .join("&");
     await firestoreRequest(`/clips/${encodeURIComponent(docId)}?${mask}`, {
@@ -300,12 +300,9 @@
         displayName,
         source: "extension",
         curatorId: session.uid,
-        curatorEmail: session.email || "",
         videoTitle,
-        startTime,
-        endTime,
         moments,
-      });
+      }, ["curatorEmail"]);
       return { ok: true, clipId: existing.id, merged: true };
     }
 
@@ -318,7 +315,6 @@
       startTime,
       endTime,
       curatorId: session.uid,
-      curatorEmail: session.email || "",
       userId: session.uid,
       username,
       displayName,
