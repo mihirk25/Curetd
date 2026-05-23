@@ -124,5 +124,5 @@ test("saveClip appends moments atomically for existing clips", async () => {
   assert.equal(appendedMoment.endTime.integerValue, "20");
   assert.equal(appendedMoment.note.stringValue, "");
   assert.equal(appendedMoment.topic.stringValue, "General");
-  assert.match(appendedMoment.addedAt.timestampValue, /^\d{4}-\d{2}-\d{2}T/);
+  assert.match(appendedMoment.addedAt.stringValue, /^\d{4}-\d{2}-\d{2}T/);
 });
