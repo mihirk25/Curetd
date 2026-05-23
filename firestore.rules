@@ -1,6 +1,25 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isSignedInOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function doesNotCreatePublicLegalName() {
+      return !request.resource.data.keys().hasAny(['firstName', 'lastName']);
+    }
+
+    function doesNotWritePublicLegalName() {
+      return !request.resource.data.diff(resource.data).addedKeys().hasAny(['firstName', 'lastName'])
+        && !request.resource.data.diff(resource.data).changedKeys().hasAny(['firstName', 'lastName']);
+    }
+
+    function hasOnlyPrivateUserFields() {
+      return request.resource.data.keys().hasOnly(['firstName', 'lastName', 'updatedAt'])
+        && request.resource.data.firstName is string
+        && request.resource.data.lastName is string;
+    }
+
     // Unique handles: public read; create/delete when the authenticated user matches { uid }.
     match /usernames/{uname} {
       allow read: if true;
@@ -12,9 +31,17 @@ service cloud.firestore {
         && request.auth.uid == resource.data.uid;
     }
 
+    match /privateUsers/{userId} {
+      allow get: if isSignedInOwner(userId);
+      allow list: if false;
+      allow create, update: if isSignedInOwner(userId) && hasOnlyPrivateUserFields();
+      allow delete: if false;
+    }
+
     match /users/{userId} {
       allow read: if true;
-      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow create: if isSignedInOwner(userId) && doesNotCreatePublicLegalName();
+      allow update: if isSignedInOwner(userId) && doesNotWritePublicLegalName();
       allow delete: if false;
     }
 

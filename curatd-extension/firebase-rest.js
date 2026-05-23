@@ -245,14 +245,37 @@
     return docIdFromName(doc.name);
   }
 
-  async function patchClip(docId, fields) {
-    const mask = Object.keys(fields)
-      .map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`)
-      .join("&");
-    await firestoreRequest(`/clips/${encodeURIComponent(docId)}?${mask}`, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: buildFieldsObject(fields) }),
+  function clipDocumentName(docId) {
+    const { projectId } = cfg();
+    return `projects/${projectId}/databases/(default)/documents/clips/${docId}`;
+  }
+
+  async function commitWrites(writes) {
+    await firestoreRequest(":commit", {
+      method: "POST",
+      body: JSON.stringify({ writes }),
     });
+  }
+
+  async function updateClipAndAppendMoment(docId, fields, moment) {
+    await commitWrites([
+      {
+        update: {
+          name: clipDocumentName(docId),
+          fields: buildFieldsObject(fields),
+        },
+        updateMask: { fieldPaths: Object.keys(fields) },
+        updateTransforms: [
+          {
+            fieldPath: "moments",
+            appendMissingElements: {
+              values: [encodeValue(moment)],
+            },
+          },
+        ],
+        currentDocument: { exists: true },
+      },
+    ]);
   }
 
   async function saveClip(data) {
@@ -288,9 +311,7 @@
     const existing = await findExistingClip(session.uid, videoId);
 
     if (existing) {
-      const moments = Array.isArray(existing.data.moments) ? [...existing.data.moments] : [];
-      moments.push(moment);
-      await patchClip(existing.id, {
+      await updateClipAndAppendMoment(existing.id, {
         title: videoTitle,
         channelName,
         videoId,
@@ -304,8 +325,7 @@
         videoTitle,
         startTime,
         endTime,
-        moments,
-      });
+      }, moment);
       return { ok: true, clipId: existing.id, merged: true };
     }
 
