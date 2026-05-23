@@ -10,6 +10,9 @@ function okJson(body) {
     async text() {
       return JSON.stringify(body);
     },
+    async json() {
+      return body;
+    },
   };
 }
 
