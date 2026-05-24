@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -9,6 +10,7 @@ import {
   serverTimestamp,
   setDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 
@@ -59,11 +61,14 @@ export async function saveUserLegalName(
   if (!firstName || !lastName) {
     throw new Error("INVALID_NAME");
   }
-  await setDoc(
+  const batch = writeBatch(db);
+  batch.set(doc(db, "privateUsers", uid), { firstName, lastName }, { merge: true });
+  batch.set(
     doc(db, "users", uid),
-    { firstName, lastName },
+    { firstName: deleteField(), lastName: deleteField() },
     { merge: true },
   );
+  await batch.commit();
 }
 
 export function validateUsernameFormat(raw: string): { username: string; ok: true } {

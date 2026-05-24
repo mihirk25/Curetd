@@ -38,6 +38,10 @@ function mergeAuthProfile(
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+function notifyCuratdAuthChanged() {
+  window.dispatchEvent(new Event("curatd-auth-changed"));
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [profileDoc, setProfileDoc] = useState<{
@@ -50,6 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setFirebaseUser(u);
       setLoading(false);
+      notifyCuratdAuthChanged();
       if (!u) {
         setProfileDoc(null);
       }
@@ -124,6 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
       signOut: async () => {
         await firebaseSignOut(auth);
+        notifyCuratdAuthChanged();
       },
     };
   }, [user, loading]);
