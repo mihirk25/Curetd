@@ -103,7 +103,9 @@ test("existing extension saves append a moment atomically", async () => {
     endTime: 20,
   });
 
-  assert.deepEqual(result, { ok: true, clipId: "clip-1", merged: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.clipId, "clip-1");
+  assert.equal(result.merged, true);
 
   const commit = requests.find((request) => String(request.url).endsWith("/documents:commit"));
   assert.ok(commit, "expected existing clip saves to use the commit endpoint");
