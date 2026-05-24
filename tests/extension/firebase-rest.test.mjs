@@ -8,6 +8,7 @@ const source = readFileSync(new URL("../../curatd-extension/firebase-rest.js", i
 function jsonResponse(body) {
   return {
     ok: true,
+    json: async () => body,
     text: async () => JSON.stringify(body),
   };
 }

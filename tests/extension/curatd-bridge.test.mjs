@@ -73,12 +73,9 @@ test("bridge clears extension auth on an initial signed-out state", async () => 
   await waitForBridge();
   await waitForBridge();
 
-  assert.deepEqual(messages, [
-    {
-      type: "CURATD_AUTH_SESSION",
-      session: null,
-    },
-  ]);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, "CURATD_AUTH_SESSION");
+  assert.equal(messages[0].session, null);
 });
 
 test("bridge does not sync auth rows for a different Firebase key", async () => {
@@ -114,10 +111,7 @@ test("bridge does not sync auth rows for a different Firebase key", async () => 
   await waitForBridge();
   await waitForBridge();
 
-  assert.deepEqual(messages, [
-    {
-      type: "CURATD_AUTH_SESSION",
-      session: null,
-    },
-  ]);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, "CURATD_AUTH_SESSION");
+  assert.equal(messages[0].session, null);
 });
