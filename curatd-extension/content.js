@@ -419,6 +419,7 @@
 
     let activeHandle = null;
     let capturedPointerId = null;
+    let capturedPointerHandle = null;
 
     function onPointerMove(e) {
       if (!activeHandle) return;
@@ -434,14 +435,21 @@
 
     function onPointerUp() {
       const pointerId = capturedPointerId;
+      const pointerHandle = capturedPointerHandle;
       activeHandle = null;
       capturedPointerId = null;
+      capturedPointerHandle = null;
       document.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("pointerup", onPointerUp);
       document.removeEventListener("pointercancel", onPointerUp);
       if (pointerId != null) {
-        handleStart.releasePointerCapture?.(pointerId);
-        handleEnd.releasePointerCapture?.(pointerId);
+        try {
+          if (pointerHandle?.hasPointerCapture?.(pointerId)) {
+            pointerHandle.releasePointerCapture(pointerId);
+          }
+        } catch {
+          // Pointer capture can already be released by the browser after cancellation.
+        }
       }
     }
 
@@ -450,6 +458,7 @@
         e.preventDefault();
         activeHandle = which;
         capturedPointerId = e.pointerId;
+        capturedPointerHandle = handleEl;
         handleEl.setPointerCapture(e.pointerId);
         document.addEventListener("pointermove", onPointerMove);
         document.addEventListener("pointerup", onPointerUp);
@@ -477,6 +486,7 @@
       }
       render();
       capturedPointerId = e.pointerId;
+      capturedPointerHandle = handleEl;
       handleEl.setPointerCapture(e.pointerId);
       document.addEventListener("pointermove", onPointerMove);
       document.addEventListener("pointerup", onPointerUp);
