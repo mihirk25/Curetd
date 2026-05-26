@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -8,6 +9,7 @@ import {
   runTransaction,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where,
 } from "firebase/firestore";
 import { db } from "../../firebase";
@@ -16,13 +18,37 @@ export const USERNAME_TAKEN = "USERNAME_TAKEN";
 
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 
-export function profileNeedsLegalName(data: {
+type LegalNameData = {
   firstName?: unknown;
   lastName?: unknown;
-} | null): boolean {
+} | null;
+
+export function profileNeedsLegalName(data: LegalNameData): boolean {
   const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
   const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
   return !firstName || !lastName;
+}
+
+function getLegalName(data: LegalNameData): { firstName: string; lastName: string } | null {
+  const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
+  const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
+  if (!firstName || !lastName) return null;
+  return { firstName, lastName };
+}
+
+function hasPublicLegalNameFields(data: LegalNameData): boolean {
+  return data != null && ("firstName" in data || "lastName" in data);
+}
+
+async function clearPublicLegalName(uid: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, "users", uid), {
+      firstName: deleteField(),
+      lastName: deleteField(),
+    });
+  } catch {
+    // The private profile write is the durable source of truth; retry cleanup on next owner session.
+  }
 }
 
 /** Internal-only profile fields — never shown in public UI. */
@@ -60,10 +86,30 @@ export async function saveUserLegalName(
     throw new Error("INVALID_NAME");
   }
   await setDoc(
-    doc(db, "users", uid),
-    { firstName, lastName },
+    doc(db, "privateUsers", uid),
+    { firstName, lastName, updatedAt: serverTimestamp() },
     { merge: true },
   );
+  await clearPublicLegalName(uid);
+}
+
+export async function migratePublicLegalName(
+  uid: string,
+  data: LegalNameData,
+): Promise<boolean> {
+  if (!hasPublicLegalNameFields(data)) return false;
+
+  const legalName = getLegalName(data);
+  if (legalName) {
+    await setDoc(
+      doc(db, "privateUsers", uid),
+      { ...legalName, updatedAt: serverTimestamp() },
+      { merge: true },
+    );
+  }
+
+  await clearPublicLegalName(uid);
+  return Boolean(legalName);
 }
 
 export function validateUsernameFormat(raw: string): { username: string; ok: true } {
