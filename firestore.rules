@@ -1,6 +1,23 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function isLegalNameFree() {
+      return !request.resource.data.keys().hasAny(['firstName', 'lastName']);
+    }
+
+    function isOnlyDeletingLegalName() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny(['firstName', 'lastName'])
+        && isLegalNameFree();
+    }
+
+    function isNotChangingLegalName() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['firstName', 'lastName']);
+    }
+
     // Unique handles: public read; create/delete when the authenticated user matches { uid }.
     match /usernames/{uname} {
       allow read: if true;
@@ -14,7 +31,17 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if true;
-      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow create: if isOwner(userId) && isLegalNameFree();
+      allow update: if isOwner(userId) && (isNotChangingLegalName() || isOnlyDeletingLegalName());
+      allow delete: if false;
+    }
+
+    match /privateUsers/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && request.resource.data.keys().hasOnly(['firstName', 'lastName', 'updatedAt'])
+        && request.resource.data.firstName is string
+        && request.resource.data.lastName is string;
       allow delete: if false;
     }
 

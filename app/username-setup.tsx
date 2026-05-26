@@ -6,6 +6,7 @@ import { db } from "../firebase";
 import { useAuth } from "./auth-context";
 import {
   ensureGoogleUserHasUsername,
+  migratePublicLegalName,
   profileNeedsLegalName,
   registerInitialUsername,
   saveUserLegalName,
@@ -77,8 +78,11 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
       return;
     }
 
+    let cancelled = false;
     const userRef = doc(db, "users", user.uid);
-    const unsub = onSnapshot(
+    const privateUserRef = doc(db, "privateUsers", user.uid);
+
+    const userUnsub = onSnapshot(
       userRef,
       (snap) => {
         const data = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
@@ -87,15 +91,30 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
             ? String(data.username).toLowerCase()
             : null;
         setUsername(v);
-        setNeedsNames(profileNeedsLegalName(data));
+        if (data) {
+          void migratePublicLegalName(user.uid, data)
+            .then((migrated) => {
+              if (!cancelled && migrated) setNeedsNames(false);
+            })
+            .catch(() => {});
+        }
       },
       () => {
         setUsername(null);
+      },
+    );
+
+    const privateUserUnsub = onSnapshot(
+      privateUserRef,
+      (snap) => {
+        const data = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
+        setNeedsNames(profileNeedsLegalName(data));
+      },
+      () => {
         setNeedsNames(true);
       },
     );
 
-    let cancelled = false;
     setChecking(true);
     void (async () => {
       try {
@@ -113,7 +132,8 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
 
     return () => {
       cancelled = true;
-      unsub();
+      userUnsub();
+      privateUserUnsub();
     };
   }, [user?.uid]);
 

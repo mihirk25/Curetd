@@ -245,14 +245,34 @@
     return docIdFromName(doc.name);
   }
 
-  async function patchClip(docId, fields) {
-    const mask = Object.keys(fields)
-      .map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`)
-      .join("&");
-    await firestoreRequest(`/clips/${encodeURIComponent(docId)}?${mask}`, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: buildFieldsObject(fields) }),
-    });
+  async function patchClipAndAppendMoment(docId, fields, moment) {
+    const { projectId } = cfg();
+    const documentName = `projects/${projectId}/databases/(default)/documents/clips/${docId}`;
+    const fieldPaths = Array.from(new Set([...Object.keys(fields), "curatorEmail"]));
+    await firestoreRequest(
+      `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:commit`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          writes: [
+            {
+              update: {
+                name: documentName,
+                fields: buildFieldsObject(fields),
+              },
+              updateMask: { fieldPaths },
+              updateTransforms: [
+                {
+                  fieldPath: "moments",
+                  appendMissingElements: { values: [encodeValue(moment)] },
+                },
+              ],
+              currentDocument: { exists: true },
+            },
+          ],
+        }),
+      },
+    );
   }
 
   async function saveClip(data) {
@@ -288,24 +308,24 @@
     const existing = await findExistingClip(session.uid, videoId);
 
     if (existing) {
-      const moments = Array.isArray(existing.data.moments) ? [...existing.data.moments] : [];
-      moments.push(moment);
-      await patchClip(existing.id, {
-        title: videoTitle,
-        channelName,
-        videoId,
-        videoUrl,
-        audioOnly: false,
-        username,
-        displayName,
-        source: "extension",
-        curatorId: session.uid,
-        curatorEmail: session.email || "",
-        videoTitle,
-        startTime,
-        endTime,
-        moments,
-      });
+      await patchClipAndAppendMoment(
+        existing.id,
+        {
+          title: videoTitle,
+          channelName,
+          videoId,
+          videoUrl,
+          audioOnly: false,
+          username,
+          displayName,
+          source: "extension",
+          curatorId: session.uid,
+          videoTitle,
+          startTime,
+          endTime,
+        },
+        moment,
+      );
       return { ok: true, clipId: existing.id, merged: true };
     }
 
@@ -318,7 +338,6 @@
       startTime,
       endTime,
       curatorId: session.uid,
-      curatorEmail: session.email || "",
       userId: session.uid,
       username,
       displayName,
