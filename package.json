@@ -7,6 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:extension": "node tests/extension-firebase-rest.test.js",
+    "test:privacy": "node tests/privacy-rules-regression.test.js",
+    "test:regressions": "npm run test:extension && npm run test:privacy",
     "generate:og": "node scripts/generate-og-image.mjs",
     "generate:favicons": "node scripts/generate-favicons.mjs"
   },
