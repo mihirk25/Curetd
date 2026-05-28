@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "./auth-context";
@@ -45,6 +45,7 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
   const [input, setInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const migratingLegacyNamesRef = useRef<string | null>(null);
 
   const refreshUsername = useCallback(async () => {
     if (!user) {
@@ -77,8 +78,11 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
       return;
     }
 
+    migratingLegacyNamesRef.current = null;
+
     const userRef = doc(db, "users", user.uid);
-    const unsub = onSnapshot(
+    const privateUserRef = doc(db, "privateUsers", user.uid);
+    const unsubUser = onSnapshot(
       userRef,
       (snap) => {
         const data = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
@@ -87,10 +91,35 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
             ? String(data.username).toLowerCase()
             : null;
         setUsername(v);
-        setNeedsNames(profileNeedsLegalName(data));
+        const legacyFirstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
+        const legacyLastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
+        if (legacyFirstName && legacyLastName) {
+          const migrationKey = `${legacyFirstName}\n${legacyLastName}`;
+          if (migratingLegacyNamesRef.current !== migrationKey) {
+            migratingLegacyNamesRef.current = migrationKey;
+            void saveUserLegalName(user.uid, {
+              firstName: legacyFirstName,
+              lastName: legacyLastName,
+            }).catch(() => {
+              migratingLegacyNamesRef.current = null;
+            });
+          }
+        } else {
+          migratingLegacyNamesRef.current = null;
+        }
       },
       () => {
         setUsername(null);
+      },
+    );
+
+    const unsubPrivateUser = onSnapshot(
+      privateUserRef,
+      (snap) => {
+        const data = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
+        setNeedsNames(profileNeedsLegalName(data));
+      },
+      () => {
         setNeedsNames(true);
       },
     );
@@ -113,7 +142,8 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
 
     return () => {
       cancelled = true;
-      unsub();
+      unsubUser();
+      unsubPrivateUser();
     };
   }, [user?.uid]);
 
