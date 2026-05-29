@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -59,11 +60,29 @@ export async function saveUserLegalName(
   if (!firstName || !lastName) {
     throw new Error("INVALID_NAME");
   }
-  await setDoc(
-    doc(db, "users", uid),
-    { firstName, lastName },
-    { merge: true },
-  );
+  const publicUserRef = doc(db, "users", uid);
+  const privateUserRef = doc(db, "privateUsers", uid);
+
+  await runTransaction(db, async (tx) => {
+    const publicSnap = await tx.get(publicUserRef);
+    tx.set(
+      privateUserRef,
+      { firstName, lastName, updatedAt: serverTimestamp() },
+      { merge: true },
+    );
+
+    if (!publicSnap.exists()) return;
+    const publicData = publicSnap.data() as Record<string, unknown>;
+    if (
+      Object.prototype.hasOwnProperty.call(publicData, "firstName") ||
+      Object.prototype.hasOwnProperty.call(publicData, "lastName")
+    ) {
+      tx.update(publicUserRef, {
+        firstName: deleteField(),
+        lastName: deleteField(),
+      });
+    }
+  });
 }
 
 export function validateUsernameFormat(raw: string): { username: string; ok: true } {
