@@ -102,17 +102,6 @@
         }
       }
 
-      for (const row of rows) {
-        const rowKey =
-          row && typeof row === "object"
-            ? row.fbase_key || row.key || null
-            : null;
-        if (rowKey && String(rowKey).startsWith("firebase:authUser:")) {
-          const session = parseAuthEntry(row);
-          if (session) return session;
-        }
-      }
-
       return null;
     } catch {
       return null;

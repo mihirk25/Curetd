@@ -77,9 +77,28 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
       return;
     }
 
-    const userRef = doc(db, "users", user.uid);
-    const unsub = onSnapshot(
-      userRef,
+    const publicUserRef = doc(db, "users", user.uid);
+    const privateUserRef = doc(db, "privateUsers", user.uid);
+    let lastLegacyNamePayload = "";
+
+    const migrateLegacyLegalName = (data: Record<string, unknown> | null) => {
+      const legacyFirstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
+      const legacyLastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
+      if (!legacyFirstName || !legacyLastName) return;
+
+      const payload = `${legacyFirstName}\n${legacyLastName}`;
+      if (payload === lastLegacyNamePayload) return;
+      lastLegacyNamePayload = payload;
+      void saveUserLegalName(user.uid, {
+        firstName: legacyFirstName,
+        lastName: legacyLastName,
+      }).catch(() => {
+        lastLegacyNamePayload = "";
+      });
+    };
+
+    const unsubPublicUser = onSnapshot(
+      publicUserRef,
       (snap) => {
         const data = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
         const v =
@@ -87,10 +106,19 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
             ? String(data.username).toLowerCase()
             : null;
         setUsername(v);
-        setNeedsNames(profileNeedsLegalName(data));
+        migrateLegacyLegalName(data);
       },
       () => {
         setUsername(null);
+      },
+    );
+    const unsubPrivateUser = onSnapshot(
+      privateUserRef,
+      (snap) => {
+        const data = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
+        setNeedsNames(profileNeedsLegalName(data));
+      },
+      () => {
         setNeedsNames(true);
       },
     );
@@ -113,7 +141,8 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
 
     return () => {
       cancelled = true;
-      unsub();
+      unsubPublicUser();
+      unsubPrivateUser();
     };
   }, [user?.uid]);
 
