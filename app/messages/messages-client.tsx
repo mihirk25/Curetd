@@ -134,7 +134,7 @@ type UserMini = {
   profilePhoto?: string | null;
 };
 
-function conversationHasParticipant(data: ConversationDoc | Record<string, any> | null | undefined, uid: string) {
+function conversationHasParticipant(data: ConversationDoc | Record<string, unknown> | null | undefined, uid: string) {
   const participants = Array.isArray(data?.participants) ? data.participants : [];
   return participants.includes(uid);
 }
