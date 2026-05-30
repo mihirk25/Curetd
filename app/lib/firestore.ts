@@ -79,10 +79,9 @@ export async function sendMessage(
   const msgCol = fsCollection(db, "conversations", conversationId, "messages");
 
   const convSnap = await fsGetDoc(convRef);
-  const participants: string[] = convSnap.exists()
-    ? Array.isArray((convSnap.data() as any)?.participants)
-      ? (convSnap.data() as any).participants
-      : []
+  const conversationData = convSnap.exists() ? (convSnap.data() as { participants?: unknown }) : null;
+  const participants = Array.isArray(conversationData?.participants)
+    ? conversationData.participants.filter((uid): uid is string => typeof uid === "string")
     : [];
   if (!participants.includes(senderId)) {
     throw new Error("Sender is not a participant in this conversation.");
