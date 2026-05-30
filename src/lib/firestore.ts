@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -60,10 +61,44 @@ export async function saveUserLegalName(
     throw new Error("INVALID_NAME");
   }
   await setDoc(
-    doc(db, "users", uid),
-    { firstName, lastName },
+    doc(db, "privateUsers", uid),
+    { firstName, lastName, updatedAt: serverTimestamp() },
     { merge: true },
   );
+  await setDoc(
+    doc(db, "users", uid),
+    { firstName: deleteField(), lastName: deleteField() },
+    { merge: true },
+  );
+}
+
+export async function migrateLegacyLegalName(uid: string): Promise<void> {
+  const userRef = doc(db, "users", uid);
+  const privateRef = doc(db, "privateUsers", uid);
+  const [userSnap, privateSnap] = await Promise.all([getDoc(userRef), getDoc(privateRef)]);
+  const publicData = userSnap.exists() ? (userSnap.data() as { firstName?: unknown; lastName?: unknown }) : null;
+  const privateData = privateSnap.exists()
+    ? (privateSnap.data() as { firstName?: unknown; lastName?: unknown })
+    : null;
+  const publicFirstName = typeof publicData?.firstName === "string" ? publicData.firstName.trim() : "";
+  const publicLastName = typeof publicData?.lastName === "string" ? publicData.lastName.trim() : "";
+  const privateHasName = !profileNeedsLegalName(privateData);
+
+  if (!privateHasName && publicFirstName && publicLastName) {
+    await setDoc(
+      privateRef,
+      { firstName: publicFirstName, lastName: publicLastName, updatedAt: serverTimestamp() },
+      { merge: true },
+    );
+  }
+
+  if (publicFirstName || publicLastName) {
+    await setDoc(
+      userRef,
+      { firstName: deleteField(), lastName: deleteField() },
+      { merge: true },
+    );
+  }
 }
 
 export function validateUsernameFormat(raw: string): { username: string; ok: true } {
