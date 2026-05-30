@@ -1,27 +1,56 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function hasPrivateUserFields(data) {
+      return data.keys().hasAny(['firstName', 'lastName']);
+    }
+
+    function isConversationParticipant(data) {
+      return signedIn()
+        && data.participants is list
+        && request.auth.uid in data.participants;
+    }
+
+    function conversationPath(conversationId) {
+      return /databases/$(database)/documents/conversations/$(conversationId);
+    }
+
     // Unique handles: public read; create/delete when the authenticated user matches { uid }.
     match /usernames/{uname} {
       allow read: if true;
-      allow create: if request.auth != null
+      allow create: if signedIn()
         && request.resource.data.keys().hasOnly(['uid'])
         && request.auth.uid == request.resource.data.uid;
       allow update: if false;
-      allow delete: if request.auth != null
+      allow delete: if signedIn()
         && request.auth.uid == resource.data.uid;
     }
 
     match /users/{userId} {
-      allow read: if true;
-      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow read: if !hasPrivateUserFields(resource.data) || isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && !hasPrivateUserFields(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /privateUsers/{userId} {
+      allow read, create, update: if isOwner(userId);
       allow delete: if false;
     }
 
     match /clips/{clipId} {
       allow read: if true;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if signedIn()
         && resource != null
         && resource.data.userId == request.auth.uid;
     }
@@ -29,23 +58,35 @@ service cloud.firestore {
     // Clip subcollections (likes, comments, …). Emoji reactions path removed from UI — block writes under reactions/*.
     match /clips/{clipId}/{document=**} {
       allow read: if true;
-      allow write: if request.auth != null && !document.matches("reactions/.*");
+      allow write: if signedIn() && !document.matches("reactions/.*");
     }
 
     match /savedClips/{id} {
-      allow read, write: if request.auth != null;
+      allow read: if signedIn()
+        && resource.data.userId == request.auth.uid;
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid;
+      allow delete: if signedIn()
+        && resource.data.userId == request.auth.uid;
     }
 
     match /follows/{id} {
-      allow read, write: if request.auth != null;
+      allow read, write: if signedIn();
     }
 
     match /conversations/{id} {
-      allow read, write: if request.auth != null;
+      allow read, update, delete: if isConversationParticipant(resource.data);
+      allow create: if isConversationParticipant(request.resource.data);
     }
 
     match /conversations/{id}/messages/{mid} {
-      allow read, write: if request.auth != null;
+      allow read, update, delete: if isConversationParticipant(get(conversationPath(id)).data);
+      allow create: if signedIn()
+        && request.resource.data.senderId == request.auth.uid
+        && isConversationParticipant(getAfter(conversationPath(id)).data);
     }
   }
 }

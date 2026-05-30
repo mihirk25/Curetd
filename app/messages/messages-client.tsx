@@ -134,6 +134,11 @@ type UserMini = {
   profilePhoto?: string | null;
 };
 
+function conversationHasParticipant(data: ConversationDoc | Record<string, any> | null | undefined, uid: string) {
+  const participants = Array.isArray(data?.participants) ? data.participants : [];
+  return participants.includes(uid);
+}
+
 function profileImageUrl(p: UserMini | null | undefined): string | null {
   const url = p?.photoURL || p?.profilePhoto;
   return typeof url === "string" && url.trim() ? url.trim() : null;
@@ -442,9 +447,11 @@ export function MessagesClient() {
         const snap = await getDoc(doc(db, "conversations", activeConversationId));
         if (cancelled) return;
         if (!snap.exists()) return;
+        const data = snap.data() as ConversationDoc;
+        if (!conversationHasParticipant(data, user.uid)) return;
         setConversations((prev) => {
           if (prev.some((c) => c.id === activeConversationId)) return prev;
-          return [{ id: activeConversationId, data: snap.data() as any }, ...prev];
+          return [{ id: activeConversationId, data }, ...prev];
         });
       } catch {
         // ignore
@@ -520,7 +527,12 @@ export function MessagesClient() {
   }, [activeConversation, profilesByUid, user]);
 
   useEffect(() => {
-    if (!user || !activeConversationId) {
+    if (
+      !user ||
+      !activeConversationId ||
+      !activeConversation ||
+      !conversationHasParticipant(activeConversation.data, user.uid)
+    ) {
       setMessages([]);
       return;
     }
@@ -543,13 +555,14 @@ export function MessagesClient() {
     });
 
     return () => unsub();
-  }, [user?.uid, activeConversationId]);
+  }, [user?.uid, activeConversationId, activeConversation]);
 
   useEffect(() => {
-    if (!user || !activeConversationId) return;
+    if (!user || !activeConversationId || !activeConversation) return;
+    if (!conversationHasParticipant(activeConversation.data, user.uid)) return;
     // Explicitly clear unreadBy badge for this conversation on open
     void updateDoc(doc(db, "conversations", activeConversationId), { [`unreadBy.${user.uid}`]: 0 }).catch(() => {});
-  }, [user?.uid, activeConversationId]);
+  }, [user?.uid, activeConversationId, activeConversation]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
@@ -621,6 +634,7 @@ export function MessagesClient() {
 
     const parts = (activeConversation.data.participants as any) as [string, string] | undefined;
     if (!Array.isArray(parts) || parts.length < 2) return;
+    if (!parts.includes(user.uid)) return;
 
     setSending(true);
     try {

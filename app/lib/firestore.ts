@@ -78,6 +78,16 @@ export async function sendMessage(
   const convRef = fsDoc(db, "conversations", conversationId);
   const msgCol = fsCollection(db, "conversations", conversationId, "messages");
 
+  const convSnap = await fsGetDoc(convRef);
+  const participants: string[] = convSnap.exists()
+    ? Array.isArray((convSnap.data() as any)?.participants)
+      ? (convSnap.data() as any).participants
+      : []
+    : [];
+  if (!participants.includes(senderId)) {
+    throw new Error("Sender is not a participant in this conversation.");
+  }
+
   await addDoc(msgCol, {
     senderId: String(senderId),
     text: String(text ?? ""),
@@ -86,13 +96,6 @@ export async function sendMessage(
     ...(youtubeUrl ? { youtubeUrl } : {}),
     createdAt: fsServerTimestamp(),
   });
-
-  const convSnap = await fsGetDoc(convRef);
-  const participants: string[] = convSnap.exists()
-    ? Array.isArray((convSnap.data() as any)?.participants)
-      ? (convSnap.data() as any).participants
-      : []
-    : [];
 
   const lastMessage =
     type === "clip" ? "[Clip]" : type === "youtube" ? "[YouTube]" : String(text ?? "");
