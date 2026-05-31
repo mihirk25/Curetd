@@ -168,8 +168,8 @@ test("new extension clips use owner-scoped deterministic docs without email", as
     write.update.name,
     "projects/demo/databases/(default)/documents/clips/ext_uid1_abc123_video",
   );
-  assert.equal(write.update.fields.userId, stringValue("uid1"));
-  assert.equal(write.update.fields.curatorId, stringValue("uid1"));
+  assert.equal(write.update.fields.userId.stringValue, "uid1");
+  assert.equal(write.update.fields.curatorId.stringValue, "uid1");
   assert.equal(write.update.fields.curatorEmail, undefined);
   assert.ok(write.updateMask.fieldPaths.includes("curatorEmail"));
   assert.equal(write.update.fields.moments, undefined);
