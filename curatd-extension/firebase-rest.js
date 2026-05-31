@@ -257,7 +257,7 @@
               fields: buildFieldsObject(fields),
             },
             updateMask: {
-              fieldPaths: Object.keys(fields),
+              fieldPaths: [...Object.keys(fields), "curatorEmail"],
             },
             updateTransforms: [
               {

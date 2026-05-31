@@ -109,12 +109,12 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
     setChecking(true);
     void (async () => {
       try {
+        await migrateLegacyLegalName(user.uid);
         await ensureGoogleUserHasUsername({
           uid: user.uid,
           email: user.email,
           photoURL: user.photoURL,
         });
-        await migrateLegacyLegalName(user.uid);
       } catch {
         // Firestore rules or offline; snapshot + onboarding flow still apply
       } finally {
