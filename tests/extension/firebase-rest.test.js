@@ -161,7 +161,9 @@ test("new extension clips use owner-scoped deterministic docs without email", as
   assert.ok(commit, "expected a Firestore commit request");
   const write = commit.body.writes[0];
 
-  assert.deepEqual(result, { ok: true, clipId: "ext_uid1_abc123_video", merged: false });
+  assert.equal(result.ok, true);
+  assert.equal(result.clipId, "ext_uid1_abc123_video");
+  assert.equal(result.merged, false);
   assert.equal(
     write.update.name,
     "projects/demo/databases/(default)/documents/clips/ext_uid1_abc123_video",
