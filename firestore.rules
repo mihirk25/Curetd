@@ -1,6 +1,47 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedInAs(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function privateUserFields() {
+      return ['firstName', 'lastName'];
+    }
+
+    function privateUserStoredFields() {
+      return ['firstName', 'lastName', 'updatedAt'];
+    }
+
+    function publicUserFields() {
+      return [
+        'username',
+        'photoURL',
+        'createdAt',
+        'hasAddedClip',
+        'hasSeenTopicPrompt',
+        'profileTopics'
+      ];
+    }
+
+    function isValidPrivateUser() {
+      return request.resource.data.keys().hasOnly(privateUserStoredFields())
+        && request.resource.data.keys().hasAll(privateUserFields())
+        && request.resource.data.firstName is string
+        && request.resource.data.lastName is string
+        && request.resource.data.firstName.size() > 0
+        && request.resource.data.lastName.size() > 0;
+    }
+
+    function doesNotExposeClipEmailOnCreate() {
+      return !request.resource.data.keys().hasAny(['curatorEmail']);
+    }
+
+    function doesNotAddOrChangeClipEmail() {
+      return !request.resource.data.diff(resource.data).addedKeys().hasAny(['curatorEmail'])
+        && !request.resource.data.diff(resource.data).changedKeys().hasAny(['curatorEmail']);
+    }
+
     // Unique handles: public read; create/delete when the authenticated user matches { uid }.
     match /usernames/{uname} {
       allow read: if true;
@@ -13,15 +54,29 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if true;
-      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow read: if signedInAs(userId) || !resource.data.keys().hasAny(privateUserFields());
+      allow create, update: if signedInAs(userId)
+        && request.resource.data.keys().hasOnly(publicUserFields());
+      allow delete: if false;
+    }
+
+    match /privateUsers/{userId} {
+      allow read: if signedInAs(userId);
+      allow create, update: if signedInAs(userId) && isValidPrivateUser();
       allow delete: if false;
     }
 
     match /clips/{clipId} {
       allow read: if true;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid
+        && doesNotExposeClipEmailOnCreate();
+      allow update: if request.auth != null
+        && resource != null
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid
+        && doesNotAddOrChangeClipEmail();
+      allow delete: if request.auth != null
         && resource != null
         && resource.data.userId == request.auth.uid;
     }

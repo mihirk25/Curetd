@@ -7,6 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:extension": "node scripts/test-extension-rest.mjs",
+    "test:privacy": "node scripts/test-privacy-guards.mjs",
+    "test:regressions": "npm run test:extension && npm run test:privacy",
     "generate:og": "node scripts/generate-og-image.mjs",
     "generate:favicons": "node scripts/generate-favicons.mjs"
   },

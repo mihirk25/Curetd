@@ -138,7 +138,36 @@
     }
     if (!res.ok) {
       const msg = data?.error?.message || `Firestore request failed (${res.status})`;
-      throw new Error(msg);
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  }
+
+  function firestoreDocumentName(collectionId, docId) {
+    const { projectId } = cfg();
+    return `projects/${projectId}/databases/(default)/documents/${collectionId}/${docId}`;
+  }
+
+  async function commitWrites(writes) {
+    const { projectId } = cfg();
+    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:commit`;
+    const session = await getValidSession();
+    if (!session) {
+      throw new Error("Please sign in at curatd.live first, then try again.");
+    }
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.idToken}`,
+      },
+      body: JSON.stringify({ writes }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data?.error?.message || "Firestore commit failed.");
     }
     return data;
   }
@@ -170,7 +199,15 @@
   }
 
   async function getUserProfile(uid) {
-    const doc = await firestoreRequest(`/users/${encodeURIComponent(uid)}`);
+    let doc = null;
+    try {
+      doc = await firestoreRequest(`/users/${encodeURIComponent(uid)}`);
+    } catch (err) {
+      if (err?.status === 404) {
+        return { username: null, displayName: null };
+      }
+      throw err;
+    }
     const data = decodeDocument(doc);
     const username =
       typeof data.username === "string" && data.username.trim()
@@ -237,22 +274,29 @@
     return fields;
   }
 
-  async function createClip(fields) {
-    const doc = await firestoreRequest("/clips", {
-      method: "POST",
-      body: JSON.stringify({ fields: buildFieldsObject(fields) }),
-    });
-    return docIdFromName(doc.name);
+  function deterministicClipId(uid, videoId, audioOnly) {
+    const raw = `${uid}_${videoId}_${audioOnly ? "audio" : "video"}`;
+    return raw.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 140);
   }
 
-  async function patchClip(docId, fields) {
-    const mask = Object.keys(fields)
-      .map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`)
-      .join("&");
-    await firestoreRequest(`/clips/${encodeURIComponent(docId)}?${mask}`, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: buildFieldsObject(fields) }),
-    });
+  async function upsertClipWithMoment(docId, fields, moment) {
+    await commitWrites([
+      {
+        update: {
+          name: firestoreDocumentName("clips", docId),
+          fields: buildFieldsObject(fields),
+        },
+        updateMask: { fieldPaths: Object.keys(fields).concat(["curatorEmail"]) },
+        updateTransforms: [
+          {
+            fieldPath: "moments",
+            appendMissingElements: {
+              values: [encodeValue(moment)],
+            },
+          },
+        ],
+      },
+    ]);
   }
 
   async function saveClip(data) {
@@ -288,9 +332,7 @@
     const existing = await findExistingClip(session.uid, videoId);
 
     if (existing) {
-      const moments = Array.isArray(existing.data.moments) ? [...existing.data.moments] : [];
-      moments.push(moment);
-      await patchClip(existing.id, {
+      await upsertClipWithMoment(existing.id, {
         title: videoTitle,
         channelName,
         videoId,
@@ -300,16 +342,15 @@
         displayName,
         source: "extension",
         curatorId: session.uid,
-        curatorEmail: session.email || "",
         videoTitle,
         startTime,
         endTime,
-        moments,
-      });
+      }, moment);
       return { ok: true, clipId: existing.id, merged: true };
     }
 
-    const clipId = await createClip({
+    const clipId = deterministicClipId(session.uid, videoId, false);
+    await upsertClipWithMoment(clipId, {
       videoId,
       videoTitle,
       videoUrl,
@@ -318,15 +359,13 @@
       startTime,
       endTime,
       curatorId: session.uid,
-      curatorEmail: session.email || "",
       userId: session.uid,
       username,
       displayName,
       audioOnly: false,
       createdAt: new Date().toISOString(),
       source: "extension",
-      moments: [moment],
-    });
+    }, moment);
 
     return { ok: true, clipId, merged: false };
   }
