@@ -255,6 +255,41 @@
     });
   }
 
+  function clipDocumentName(docId) {
+    const { projectId } = cfg();
+    return `projects/${projectId}/databases/(default)/documents/clips/${docId}`;
+  }
+
+  async function commitWrites(writes) {
+    const { projectId } = cfg();
+    await firestoreRequest(
+      `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:commit`,
+      {
+        method: "POST",
+        body: JSON.stringify({ writes }),
+      },
+    );
+  }
+
+  async function patchClipAppendingMoment(docId, fields, moment) {
+    await commitWrites([
+      {
+        update: {
+          name: clipDocumentName(docId),
+          fields: buildFieldsObject(fields),
+        },
+        updateMask: { fieldPaths: Object.keys(fields) },
+        updateTransforms: [
+          {
+            fieldPath: "moments",
+            appendMissingElements: { values: [encodeValue(moment)] },
+          },
+        ],
+        currentDocument: { exists: true },
+      },
+    ]);
+  }
+
   async function saveClip(data) {
     const session = await getValidSession();
     if (!session) {
@@ -288,9 +323,7 @@
     const existing = await findExistingClip(session.uid, videoId);
 
     if (existing) {
-      const moments = Array.isArray(existing.data.moments) ? [...existing.data.moments] : [];
-      moments.push(moment);
-      await patchClip(existing.id, {
+      await patchClipAppendingMoment(existing.id, {
         title: videoTitle,
         channelName,
         videoId,
@@ -300,12 +333,11 @@
         displayName,
         source: "extension",
         curatorId: session.uid,
-        curatorEmail: session.email || "",
+        userId: session.uid,
         videoTitle,
         startTime,
         endTime,
-        moments,
-      });
+      }, moment);
       return { ok: true, clipId: existing.id, merged: true };
     }
 
@@ -318,7 +350,6 @@
       startTime,
       endTime,
       curatorId: session.uid,
-      curatorEmail: session.email || "",
       userId: session.uid,
       username,
       displayName,
