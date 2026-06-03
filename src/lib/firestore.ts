@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -16,13 +17,20 @@ export const USERNAME_TAKEN = "USERNAME_TAKEN";
 
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 
+export function getLegalName(data: {
+  firstName?: unknown;
+  lastName?: unknown;
+} | null): { firstName: string; lastName: string } | null {
+  const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
+  const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
+  return firstName && lastName ? { firstName, lastName } : null;
+}
+
 export function profileNeedsLegalName(data: {
   firstName?: unknown;
   lastName?: unknown;
 } | null): boolean {
-  const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
-  const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
-  return !firstName || !lastName;
+  return !getLegalName(data);
 }
 
 /** Internal-only profile fields — never shown in public UI. */
@@ -59,11 +67,27 @@ export async function saveUserLegalName(
   if (!firstName || !lastName) {
     throw new Error("INVALID_NAME");
   }
-  await setDoc(
-    doc(db, "users", uid),
-    { firstName, lastName },
-    { merge: true },
-  );
+  const userRef = doc(db, "users", uid);
+  const privateUserRef = doc(db, "privateUsers", uid);
+
+  await runTransaction(db, async (tx) => {
+    const userSnap = await tx.get(userRef);
+    tx.set(
+      privateUserRef,
+      { firstName, lastName, updatedAt: serverTimestamp() },
+      { merge: true },
+    );
+
+    if (userSnap.exists()) {
+      tx.update(userRef, {
+        firstName: deleteField(),
+        lastName: deleteField(),
+        hasLegalName: true,
+      });
+    } else {
+      tx.set(userRef, { hasLegalName: true }, { merge: true });
+    }
+  });
 }
 
 export function validateUsernameFormat(raw: string): { username: string; ok: true } {
