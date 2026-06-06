@@ -17,7 +17,7 @@ const context = {
         refreshToken: "refresh-token",
         uid: "alice",
         email: "alice@example.com",
-        expiresAt: Date.now() + 60_000,
+        expiresAt: Date.now() + 3_600_000,
       };
     },
     async saveSession() {},
