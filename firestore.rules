@@ -77,9 +77,9 @@ service cloud.firestore {
     }
 
     // Clip subcollections (likes, comments, …). Emoji reactions path removed from UI — block writes under reactions/*.
-    match /clips/{clipId}/{document=**} {
+    match /clips/{clipId}/{subcollection}/{document=**} {
       allow read: if true;
-      allow write: if signedIn() && !document.matches("reactions/.*");
+      allow write: if signedIn() && subcollection != 'reactions';
     }
 
     match /savedClips/{id} {
