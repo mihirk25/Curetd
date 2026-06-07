@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:extension": "node tests/extension-save.test.mjs",
     "test:rules": "firebase emulators:exec --only firestore \"node tests/firestore-security-rules.test.mjs\"",
+    "test:regressions": "npm run test:extension && npm run test:rules",
     "generate:og": "node scripts/generate-og-image.mjs",
     "generate:favicons": "node scripts/generate-favicons.mjs"
   },
