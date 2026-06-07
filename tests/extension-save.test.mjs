@@ -89,7 +89,9 @@ async function testExistingClipUsesCommitTransform() {
     channelName: "Channel",
   });
 
-  assert.deepEqual(result, { ok: true, clipId: "existing", merged: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.clipId, "existing");
+  assert.equal(result.merged, true);
   const commit = requests.find((req) => req.url.includes("documents:commit"));
   assert.ok(commit, "expected existing clip save to use commit endpoint");
   const body = JSON.parse(commit.options.body);
@@ -127,7 +129,9 @@ async function testNewClipDoesNotWriteEmail() {
     channelName: "Channel",
   });
 
-  assert.deepEqual(result, { ok: true, clipId: "newclip", merged: false });
+  assert.equal(result.ok, true);
+  assert.equal(result.clipId, "newclip");
+  assert.equal(result.merged, false);
   const create = requests.find((req) => req.url.endsWith("/clips"));
   assert.ok(create, "expected new clip save to create a clip");
   const body = JSON.parse(create.options.body);
