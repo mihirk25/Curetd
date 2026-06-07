@@ -98,9 +98,9 @@ service cloud.firestore {
         && (resource.data.userId == request.auth.uid || isClipOwner(clipId));
     }
 
-    // Unknown clip subcollections, including removed reactions, are read-only.
+    // Unknown clip paths, including removed reactions, are denied by default.
     match /clips/{clipId}/{document=**} {
-      allow read: if true;
+      allow read: if false;
       allow write: if false;
     }
 
