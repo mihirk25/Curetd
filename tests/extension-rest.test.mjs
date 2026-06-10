@@ -12,7 +12,7 @@ async function loadFirebaseRest(fetchImpl) {
     email: "owner@example.com",
     idToken: "token",
     refreshToken: "refresh",
-    expiresAt: Date.now() + 60_000,
+    expiresAt: Date.now() + 120_000,
   };
   const context = {
     console,
