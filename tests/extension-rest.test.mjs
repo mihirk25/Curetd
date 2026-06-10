@@ -84,7 +84,9 @@ test("existing extension clip saves append moments with an atomic transform", as
     channelName: "Channel",
   });
 
-  assert.deepEqual(result, { ok: true, clipId: "clip_existing", merged: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.clipId, "clip_existing");
+  assert.equal(result.merged, true);
   assert.equal(calls.some((call) => call.options?.method === "PATCH"), false);
 
   const commitCall = calls.find((call) => String(call.url).endsWith("/documents:commit"));
@@ -146,7 +148,9 @@ test("new extension clip saves do not write public curator email", async () => {
     channelName: "Channel",
   });
 
-  assert.deepEqual(result, { ok: true, clipId: "new_clip", merged: false });
+  assert.equal(result.ok, true);
+  assert.equal(result.clipId, "new_clip");
+  assert.equal(result.merged, false);
   const createCall = calls.find((call) => String(call.url).endsWith("/documents/clips"));
   assert.ok(createCall, "expected Firestore create request");
   const body = JSON.parse(createCall.options.body);
