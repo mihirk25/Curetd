@@ -2,18 +2,20 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  addDoc,
   collection,
   documentId,
+  doc,
   getDocs,
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   where,
   limit,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import { createGroupConversation } from "../lib/firestore";
+import { getConversationId } from "../messages/messaging";
 
 type UsernameHit = { uid: string; username: string };
 
@@ -244,14 +246,19 @@ export function NewMessageModal(props: {
                     }
 
                     try {
-                      const ref = await addDoc(collection(db, "conversations"), {
-                        participants: [currentUserId, u.uid],
-                        isGroup: false,
-                        lastMessage: "",
-                        lastMessageAt: serverTimestamp(),
-                        unreadBy: { [currentUserId]: 0, [u.uid]: 0 },
-                      });
-                      onOpenConversation(ref.id);
+                      const conversationId = getConversationId(currentUserId, u.uid);
+                      await setDoc(
+                        doc(db, "conversations", conversationId),
+                        {
+                          participants: [currentUserId, u.uid],
+                          isGroup: false,
+                          lastMessage: "",
+                          lastMessageAt: serverTimestamp(),
+                          unreadBy: { [currentUserId]: 0, [u.uid]: 0 },
+                        },
+                        { merge: true },
+                      );
+                      onOpenConversation(conversationId);
                       onClose();
                     } catch {
                       // ignore for now

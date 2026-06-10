@@ -7,6 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:extension": "node --test tests/extension-rest.test.mjs",
+    "test:rules": "firebase emulators:exec --only firestore --project curatd-rules-test \"node --test tests/firestore-rules.test.mjs\"",
+    "test:regressions": "npm run test:extension && npm run test:rules",
     "generate:og": "node scripts/generate-og-image.mjs",
     "generate:favicons": "node scripts/generate-favicons.mjs"
   },
@@ -19,12 +22,14 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
+    "firebase-tools": "^15.19.1",
     "sharp": "^0.34.5",
     "tailwindcss": "^4",
     "to-ico": "^1.1.5",
