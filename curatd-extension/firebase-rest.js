@@ -245,13 +245,33 @@
     return docIdFromName(doc.name);
   }
 
-  async function patchClip(docId, fields) {
-    const mask = Object.keys(fields)
-      .map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`)
-      .join("&");
-    await firestoreRequest(`/clips/${encodeURIComponent(docId)}?${mask}`, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: buildFieldsObject(fields) }),
+  async function patchClipAndAppendMoment(docId, fields, moment) {
+    const { projectId } = cfg();
+    const documentName =
+      `projects/${projectId}/databases/(default)/documents/clips/${docId}`;
+    await firestoreRequest(":commit", {
+      method: "POST",
+      body: JSON.stringify({
+        writes: [
+          {
+            update: {
+              name: documentName,
+              fields: buildFieldsObject(fields),
+            },
+            updateMask: {
+              fieldPaths: Object.keys(fields),
+            },
+            updateTransforms: [
+              {
+                fieldPath: "moments",
+                appendMissingElements: {
+                  values: [encodeValue(moment)],
+                },
+              },
+            ],
+          },
+        ],
+      }),
     });
   }
 
@@ -288,9 +308,7 @@
     const existing = await findExistingClip(session.uid, videoId);
 
     if (existing) {
-      const moments = Array.isArray(existing.data.moments) ? [...existing.data.moments] : [];
-      moments.push(moment);
-      await patchClip(existing.id, {
+      await patchClipAndAppendMoment(existing.id, {
         title: videoTitle,
         channelName,
         videoId,
@@ -300,12 +318,10 @@
         displayName,
         source: "extension",
         curatorId: session.uid,
-        curatorEmail: session.email || "",
         videoTitle,
         startTime,
         endTime,
-        moments,
-      });
+      }, moment);
       return { ok: true, clipId: existing.id, merged: true };
     }
 
@@ -318,7 +334,6 @@
       startTime,
       endTime,
       curatorId: session.uid,
-      curatorEmail: session.email || "",
       userId: session.uid,
       username,
       displayName,
