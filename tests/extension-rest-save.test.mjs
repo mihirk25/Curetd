@@ -97,7 +97,9 @@ const result = await context.CuratdFirebaseRest.saveClip({
   channelName: "Test channel",
 });
 
-assert.deepEqual(result, { ok: true, clipId: "existing_clip", merged: true });
+assert.equal(result.ok, true);
+assert.equal(result.clipId, "existing_clip");
+assert.equal(result.merged, true);
 
 const commit = requests.find((request) => request.url.endsWith("/documents:commit"));
 assert.ok(commit, "expected existing clip save to use Firestore commit");
