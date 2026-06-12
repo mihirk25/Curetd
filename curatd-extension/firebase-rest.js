@@ -245,16 +245,6 @@
     return docIdFromName(doc.name);
   }
 
-  async function patchClip(docId, fields) {
-    const mask = Object.keys(fields)
-      .map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`)
-      .join("&");
-    await firestoreRequest(`/clips/${encodeURIComponent(docId)}?${mask}`, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: buildFieldsObject(fields) }),
-    });
-  }
-
   async function updateClipAndAppendMoment(docId, fields, moment) {
     const { projectId } = cfg();
     const document = `projects/${projectId}/databases/(default)/documents/clips/${docId}`;
