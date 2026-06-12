@@ -47,6 +47,10 @@ declare global {
 
 const feedPlayerByClipId = new Map<string, any>();
 
+function savedClipDocId(uid: string, clipId: string) {
+  return `${uid}_${clipId}`;
+}
+
 function loadYouTubeIframeAPI(): Promise<any> {
   if (typeof window === 'undefined') return Promise.resolve(null);
   if (window.YT?.Player) return Promise.resolve(window.YT);
@@ -1014,8 +1018,16 @@ export default function CuratdMVP() {
       setSavedClips([]);
       return;
     }
-    const unsubscribeSaved = onSnapshot(collection(db, "savedClips"), (snapshot) => {
-      setSavedClips(snapshot.docs.map((d) => d.id));
+    const savedQ = query(collection(db, "savedClips"), where("userId", "==", user.uid));
+    const unsubscribeSaved = onSnapshot(savedQ, (snapshot) => {
+      setSavedClips(
+        snapshot.docs
+          .map((d) => {
+            const data = d.data() as { clipId?: unknown };
+            return typeof data.clipId === "string" ? data.clipId : null;
+          })
+          .filter(Boolean) as string[],
+      );
     });
     return () => {
       unsubscribeSaved();
@@ -3568,9 +3580,13 @@ export default function CuratdMVP() {
                               }
                               try {
                                 if (isSaved) {
-                                  await deleteDoc(doc(db, "savedClips", clip.id));
+                                  await deleteDoc(doc(db, "savedClips", savedClipDocId(user.uid, clip.id)));
                                 } else {
-                                  await setDoc(doc(db, "savedClips", clip.id), { clipId: clip.id, savedAt: serverTimestamp() });
+                                  await setDoc(doc(db, "savedClips", savedClipDocId(user.uid, clip.id)), {
+                                    userId: user.uid,
+                                    clipId: clip.id,
+                                    savedAt: serverTimestamp(),
+                                  });
                                 }
                               } catch (e) {
                                 // silent

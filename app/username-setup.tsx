@@ -1,11 +1,13 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "./auth-context";
 import {
   ensureGoogleUserHasUsername,
+  migrateLegacyPublicLegalName,
+  privateUserHasLegalName,
   profileNeedsLegalName,
   registerInitialUsername,
   saveUserLegalName,
@@ -45,6 +47,7 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
   const [input, setInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const migratedLegacyNameForUid = useRef<string | null>(null);
 
   const refreshUsername = useCallback(async () => {
     if (!user) {
@@ -87,6 +90,13 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
             ? String(data.username).toLowerCase()
             : null;
         setUsername(v);
+        if (data && migratedLegacyNameForUid.current !== user.uid) {
+          void migrateLegacyPublicLegalName(user.uid, data)
+            .then((migrated) => {
+              if (migrated) migratedLegacyNameForUid.current = user.uid;
+            })
+            .catch(() => {});
+        }
         setNeedsNames(profileNeedsLegalName(data));
       },
       () => {
@@ -104,6 +114,8 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
           email: user.email,
           photoURL: user.photoURL,
         });
+        const hasPrivateName = await privateUserHasLegalName(user.uid);
+        if (!cancelled && hasPrivateName) setNeedsNames(false);
       } catch {
         // Firestore rules or offline; snapshot + onboarding flow still apply
       } finally {
