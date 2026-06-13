@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -9,6 +10,7 @@ import {
   serverTimestamp,
   setDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 
@@ -17,9 +19,13 @@ export const USERNAME_TAKEN = "USERNAME_TAKEN";
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 
 export function profileNeedsLegalName(data: {
+  hasLegalName?: unknown;
   firstName?: unknown;
   lastName?: unknown;
 } | null): boolean {
+  if (data?.hasLegalName === true) {
+    return false;
+  }
   const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
   const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
   return !firstName || !lastName;
@@ -59,11 +65,38 @@ export async function saveUserLegalName(
   if (!firstName || !lastName) {
     throw new Error("INVALID_NAME");
   }
-  await setDoc(
-    doc(db, "users", uid),
-    { firstName, lastName },
+  const batch = writeBatch(db);
+  batch.set(
+    doc(db, "privateUsers", uid),
+    { firstName, lastName, updatedAt: serverTimestamp() },
     { merge: true },
   );
+  batch.set(
+    doc(db, "users", uid),
+    {
+      hasLegalName: true,
+      firstName: deleteField(),
+      lastName: deleteField(),
+    },
+    { merge: true },
+  );
+  await batch.commit();
+}
+
+export async function migratePublicLegalNameIfNeeded(
+  uid: string,
+  data: { hasLegalName?: unknown; firstName?: unknown; lastName?: unknown } | null,
+): Promise<boolean> {
+  if (data?.hasLegalName === true) {
+    return false;
+  }
+  const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
+  const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
+  if (!firstName || !lastName) {
+    return false;
+  }
+  await saveUserLegalName(uid, { firstName, lastName });
+  return true;
 }
 
 export function validateUsernameFormat(raw: string): { username: string; ok: true } {
