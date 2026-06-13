@@ -46,6 +46,9 @@ function jsonResponse(body, ok = true, status = 200) {
   return {
     ok,
     status,
+    async json() {
+      return body;
+    },
     async text() {
       return JSON.stringify(body);
     },
