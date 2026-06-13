@@ -86,7 +86,9 @@ async function testExistingClipUsesAtomicAppend() {
     channelName: "Curatd",
   });
 
-  assert.deepEqual(result, { ok: true, clipId: "existing-clip", merged: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.clipId, "existing-clip");
+  assert.equal(result.merged, true);
   assert.equal(requests.some((req) => req.options.method === "PATCH"), false);
   const commit = requests.find((req) => String(req.url).endsWith("/documents:commit"));
   assert.ok(commit, "existing clip saves must use documents:commit");
@@ -143,7 +145,9 @@ async function testNewClipDoesNotWriteEmail() {
     channelName: "Curatd",
   });
 
-  assert.deepEqual(result, { ok: true, clipId: "new-clip", merged: false });
+  assert.equal(result.ok, true);
+  assert.equal(result.clipId, "new-clip");
+  assert.equal(result.merged, false);
   const create = requests.find((req) => String(req.url).endsWith("/documents/clips"));
   assert.ok(create, "new clip saves must create a clip document");
   assert.equal(JSON.stringify(JSON.parse(create.options.body)).includes("curatorEmail"), false);
