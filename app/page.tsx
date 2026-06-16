@@ -970,7 +970,7 @@ export default function CuratdMVP() {
     if (onboardingStep !== 2 || selectedTopics.length === 0) return;
     let cancelled = false;
     const usersQ = query(
-      collection(db, "users"),
+      collection(db, "publicProfiles"),
       where("profileTopics", "array-contains-any", selectedTopics.slice(0, 10)),
       limit(10),
     );
@@ -1102,7 +1102,7 @@ export default function CuratdMVP() {
       const entries = await Promise.all(
         followingUserIds.map(async (uid) => {
           try {
-            const snap = await getDoc(doc(db, "users", uid));
+            const snap = await getDoc(doc(db, "publicProfiles", uid));
             const data = snap.exists() ? (snap.data() as any) : null;
             const usernameVal = typeof data?.username === "string" ? data.username.trim().toLowerCase() : null;
             const photoURLVal = typeof data?.photoURL === "string" ? data.photoURL : null;
@@ -1169,7 +1169,7 @@ export default function CuratdMVP() {
       const entries = await Promise.all(
         [...missing].map(async (uid) => {
           try {
-            const snap = await getDoc(doc(db, "users", uid));
+            const snap = await getDoc(doc(db, "publicProfiles", uid));
             const data = snap.exists() ? (snap.data() as any) : null;
             const usernameVal =
               typeof data?.username === "string" ? data.username.trim().toLowerCase() : null;
@@ -2284,10 +2284,17 @@ export default function CuratdMVP() {
                 if (!user || curatorTopicsDraft.length < 3) return;
                 setCuratorTopicsSaving(true);
                 try {
-                  await updateDoc(doc(db, "users", user.uid), {
-                    profileTopics: curatorTopicsDraft,
-                    hasSeenTopicPrompt: true,
-                  });
+                  await Promise.all([
+                    updateDoc(doc(db, "users", user.uid), {
+                      profileTopics: curatorTopicsDraft,
+                      hasSeenTopicPrompt: true,
+                    }),
+                    setDoc(
+                      doc(db, "publicProfiles", user.uid),
+                      { profileTopics: curatorTopicsDraft },
+                      { merge: true },
+                    ),
+                  ]);
                   setPostFirstClipTopicsOpen(false);
                 } catch (err) {
                   console.error("Could not save profile topics:", err);

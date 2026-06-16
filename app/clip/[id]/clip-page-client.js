@@ -65,7 +65,7 @@ async function fetchClipWithCurator(id) {
   }
 
   try {
-    const userSnap = await getDoc(doc(db, "users", clip.userId));
+    const userSnap = await getDoc(doc(db, "publicProfiles", clip.userId));
     const userData = userSnap.exists() ? userSnap.data() : null;
     username = normalizeUsername(userData == null ? null : userData.username);
   } catch {

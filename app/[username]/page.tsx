@@ -164,7 +164,7 @@ export default function PublicProfilePage() {
           return;
         }
 
-        const userSnap = await getDoc(doc(db, "users", uid));
+        const userSnap = await getDoc(doc(db, "publicProfiles", uid));
         const userData = userSnap.exists() ? userSnap.data() : null;
 
         const clipsQ = query(collection(db, "clips"), where("userId", "==", uid), orderBy("createdAt", "desc"));
@@ -431,7 +431,10 @@ export default function PublicProfilePage() {
         const storageRef = ref(storage, `profilePhotos/${user.uid}`);
         await uploadBytes(storageRef, file, { contentType: file.type });
         const url = await getDownloadURL(storageRef);
-        await updateDoc(doc(db, "users", user.uid), { photoURL: url });
+        await Promise.all([
+          updateDoc(doc(db, "users", user.uid), { photoURL: url }),
+          setDoc(doc(db, "publicProfiles", user.uid), { photoURL: url }, { merge: true }),
+        ]);
         if (auth.currentUser) {
           await updateProfile(auth.currentUser, { photoURL: url });
         }

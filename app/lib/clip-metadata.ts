@@ -65,7 +65,7 @@ async function fetchClipViaClientSdk(id: string): Promise<ClipForMetadata | null
 
   const data = snap.data() || {};
   const username = await resolveUsername(data, async (userId) => {
-    const userSnap = await getDoc(doc(db, "users", userId));
+    const userSnap = await getDoc(doc(db, "publicProfiles", userId));
     return userSnap.exists() ? normalizeUsername(userSnap.data()?.username) : null;
   });
 

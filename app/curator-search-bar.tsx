@@ -64,7 +64,7 @@ export function CuratorSearchBar() {
       return;
     }
     const q = query(
-      collection(db, "users"),
+      collection(db, "publicProfiles"),
       where("username", ">=", debouncedPrefix),
       where("username", "<=", `${debouncedPrefix}\uf8ff`),
       orderBy("username"),

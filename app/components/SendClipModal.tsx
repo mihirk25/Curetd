@@ -87,7 +87,7 @@ export function SendClipModal(props: {
           }
 
           try {
-            const snap = await getDoc(doc(db, "users", otherUid));
+            const snap = await getDoc(doc(db, "publicProfiles", otherUid));
             const u = snap.exists() ? (snap.data() as any)?.username : null;
             profileCacheRef.current[otherUid] = { username: u ?? null };
             next[c.id] = u ? `@${String(u)}` : "Unknown";
