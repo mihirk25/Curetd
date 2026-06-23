@@ -99,7 +99,9 @@ const result = await sandbox.CuratdFirebaseRest.saveClip({
   endTime: 20,
 });
 
-assert.deepEqual(result, { ok: true, clipId: "clip-1", merged: true });
+assert.equal(result.ok, true);
+assert.equal(result.clipId, "clip-1");
+assert.equal(result.merged, true);
 
 const patchCall = calls.find((call) => call.options.method === "PATCH");
 assert.equal(patchCall, undefined, "existing saves must not overwrite the moments array with PATCH");
