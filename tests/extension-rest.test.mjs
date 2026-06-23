@@ -29,7 +29,7 @@ const sandbox = {
         refreshToken: "refresh-token",
         uid: "user-a",
         email: "private@example.com",
-        expiresAt: Date.now() + 60_000,
+        expiresAt: Date.now() + 600_000,
       };
     },
     async saveSession() {},
