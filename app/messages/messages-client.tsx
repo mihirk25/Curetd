@@ -14,6 +14,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where,
 } from "firebase/firestore";
@@ -27,6 +28,10 @@ import { NewMessageModal } from "../components/NewMessageModal";
 import { Navbar } from "../components/Navbar";
 
 const YOUTUBE_URL_RE = /(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+
+function savedClipDocId(uid: string, videoId: string, startTime: number) {
+  return `${uid}_${videoId}_${Math.floor(startTime)}`;
+}
 
 function parseYouTubeTimestampSeconds(url: string): number | null {
   try {
@@ -1203,7 +1208,7 @@ export function MessagesClient() {
                                               }
                                             }
 
-                                            await addDoc(collection(db, "savedClips"), {
+                                            await setDoc(doc(db, "savedClips", savedClipDocId(user.uid, vid, st)), {
                                               userId: user.uid,
                                               videoId: vid,
                                               startTime: Math.floor(Number(clip?.startTime || 0)),

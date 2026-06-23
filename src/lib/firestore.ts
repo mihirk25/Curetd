@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -18,8 +19,10 @@ const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 
 export function profileNeedsLegalName(data: {
   firstName?: unknown;
+  hasLegalName?: unknown;
   lastName?: unknown;
 } | null): boolean {
+  if (data?.hasLegalName === true) return false;
   const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
   const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
   return !firstName || !lastName;
@@ -60,8 +63,34 @@ export async function saveUserLegalName(
     throw new Error("INVALID_NAME");
   }
   await setDoc(
+    doc(db, "privateUsers", uid),
+    { firstName, lastName, updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+  await setDoc(
     doc(db, "users", uid),
-    { firstName, lastName },
+    { hasLegalName: true, firstName: deleteField(), lastName: deleteField() },
+    { merge: true },
+  );
+}
+
+async function migrateLegacyPublicLegalName(
+  uid: string,
+  data: { firstName?: unknown; lastName?: unknown; hasLegalName?: unknown } | null,
+) {
+  if (!data || data.hasLegalName === true) return;
+  const firstName = typeof data.firstName === "string" ? data.firstName.trim() : "";
+  const lastName = typeof data.lastName === "string" ? data.lastName.trim() : "";
+  if (!firstName || !lastName) return;
+
+  await setDoc(
+    doc(db, "privateUsers", uid),
+    { firstName, lastName, updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+  await setDoc(
+    doc(db, "users", uid),
+    { hasLegalName: true, firstName: deleteField(), lastName: deleteField() },
     { merge: true },
   );
 }
@@ -109,7 +138,9 @@ export async function ensureGoogleUserHasUsername(params: {
   const userRef = doc(db, "users", uid);
   const pre = await getDoc(userRef);
   if (pre.exists()) {
-    const u = (pre.data() as { username?: string }).username;
+    const preData = pre.data() as { username?: string; firstName?: unknown; lastName?: unknown; hasLegalName?: unknown };
+    await migrateLegacyPublicLegalName(uid, preData);
+    const u = preData.username;
     if (typeof u === "string" && u.trim()) {
       return u.trim().toLowerCase();
     }

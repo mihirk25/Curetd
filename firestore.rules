@@ -1,6 +1,43 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function hasNoPublicLegalName(data) {
+      return !data.keys().hasAny(['firstName', 'lastName']);
+    }
+
+    function hasNoCuratorEmail(data) {
+      return !data.keys().hasAny(['curatorEmail']);
+    }
+
+    function validClipOwnerData(data) {
+      return data.userId == request.auth.uid
+        && (!data.keys().hasAny(['curatorId']) || data.curatorId == request.auth.uid);
+    }
+
+    function isConversationParticipantData(data) {
+      return signedIn()
+        && data.participants is list
+        && request.auth.uid in data.participants;
+    }
+
+    function isConversationParticipant(conversationId) {
+      let convo = get(/databases/$(database)/documents/conversations/$(conversationId));
+      return isConversationParticipantData(convo.data);
+    }
+
+    function isConversationParticipantAfter(conversationId) {
+      let convo = getAfter(/databases/$(database)/documents/conversations/$(conversationId));
+      return isConversationParticipantData(convo.data);
+    }
+
     // Unique handles: public read; create/delete when the authenticated user matches { uid }.
     match /usernames/{uname} {
       allow read: if true;
@@ -13,39 +50,88 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if true;
-      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow read: if isOwner(userId) || hasNoPublicLegalName(resource.data);
+      allow create, update: if isOwner(userId)
+        && hasNoPublicLegalName(request.resource.data);
       allow delete: if false;
     }
 
+    match /privateUsers/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
     match /clips/{clipId} {
-      allow read: if true;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null
+      allow read: if hasNoCuratorEmail(resource.data) || isOwner(resource.data.userId);
+      allow create: if signedIn()
+        && validClipOwnerData(request.resource.data)
+        && hasNoCuratorEmail(request.resource.data);
+      allow update: if signedIn()
+        && resource != null
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && validClipOwnerData(request.resource.data)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['curatorEmail']);
+      allow delete: if signedIn()
         && resource != null
         && resource.data.userId == request.auth.uid;
     }
 
-    // Clip subcollections (likes, comments, …). Emoji reactions path removed from UI — block writes under reactions/*.
-    match /clips/{clipId}/{document=**} {
+    match /clips/{clipId}/likes/{userId} {
       allow read: if true;
-      allow write: if request.auth != null && !document.matches("reactions/.*");
+      allow create, update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+    }
+
+    match /clips/{clipId}/comments/{commentId} {
+      allow read: if true;
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if signedIn()
+        && resource.data.userId == request.auth.uid;
+    }
+
+    match /clips/{clipId}/{subcollection}/{document} {
+      allow read: if true;
+      allow write: if false;
     }
 
     match /savedClips/{id} {
-      allow read, write: if request.auth != null;
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow read, delete: if signedIn()
+        && resource.data.userId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
     }
 
     match /follows/{id} {
-      allow read, write: if request.auth != null;
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.followerId == request.auth.uid;
+      allow delete: if signedIn()
+        && resource.data.followerId == request.auth.uid;
     }
 
     match /conversations/{id} {
-      allow read, write: if request.auth != null;
+      allow create: if isConversationParticipantData(request.resource.data);
+      allow read: if isConversationParticipantData(resource.data);
+      allow update: if isConversationParticipantData(resource.data)
+        && request.resource.data.participants == resource.data.participants;
+      allow delete: if isConversationParticipantData(resource.data);
     }
 
     match /conversations/{id}/messages/{mid} {
-      allow read, write: if request.auth != null;
+      allow read: if isConversationParticipant(id);
+      allow create: if isConversationParticipantAfter(id)
+        && request.resource.data.senderId == request.auth.uid;
+      allow update: if isConversationParticipant(id)
+        && request.resource.data.senderId == resource.data.senderId;
+      allow delete: if isConversationParticipant(id)
+        && resource.data.senderId == request.auth.uid;
     }
   }
 }
