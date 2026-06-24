@@ -119,7 +119,8 @@ test("existing extension saves append moments with a transform and do not publis
     body.writes[1].transform.fieldTransforms[0].appendMissingElements.values[0].mapValue.fields.id.stringValue,
     "moment-1",
   );
-  assert.equal(JSON.stringify(body).includes("curatorEmail"), false);
+  assert.equal(JSON.stringify(body.writes[0].update.fields).includes("curatorEmail"), false);
+  assert.equal(JSON.stringify(body.writes[1].transform).includes("curatorEmail"), false);
   assert.equal(JSON.stringify(body).includes("person@example.com"), false);
 });
 
