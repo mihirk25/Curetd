@@ -7,6 +7,7 @@ import { useAuth } from "./auth-context";
 import {
   ensureGoogleUserHasUsername,
   profileNeedsLegalName,
+  publicLegalNameForMigration,
   registerInitialUsername,
   saveUserLegalName,
 } from "../src/lib/firestore";
@@ -87,7 +88,15 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
             ? String(data.username).toLowerCase()
             : null;
         setUsername(v);
-        setNeedsNames(profileNeedsLegalName(data));
+        const publicLegalName = publicLegalNameForMigration(data);
+        if (publicLegalName) {
+          setNeedsNames(false);
+          void saveUserLegalName(user.uid, publicLegalName).catch((err) => {
+            console.error("Could not migrate public legal name:", err);
+          });
+        } else {
+          setNeedsNames(profileNeedsLegalName(data));
+        }
       },
       () => {
         setUsername(null);
