@@ -9,6 +9,9 @@ function jsonResponse(data, ok = true, status = 200) {
   return {
     ok,
     status,
+    async json() {
+      return data;
+    },
     async text() {
       return JSON.stringify(data);
     },
