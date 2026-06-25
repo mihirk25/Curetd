@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -19,10 +20,22 @@ const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 export function profileNeedsLegalName(data: {
   firstName?: unknown;
   lastName?: unknown;
+  hasLegalName?: unknown;
 } | null): boolean {
+  if (data?.hasLegalName === true) return false;
   const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
   const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
   return !firstName || !lastName;
+}
+
+function legacyLegalNameFromData(data: {
+  firstName?: unknown;
+  lastName?: unknown;
+} | null | undefined): { firstName: string; lastName: string } | null {
+  const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
+  const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
+  if (!firstName || !lastName) return null;
+  return { firstName, lastName };
 }
 
 /** Internal-only profile fields — never shown in public UI. */
@@ -59,11 +72,25 @@ export async function saveUserLegalName(
   if (!firstName || !lastName) {
     throw new Error("INVALID_NAME");
   }
-  await setDoc(
-    doc(db, "users", uid),
-    { firstName, lastName },
-    { merge: true },
-  );
+  const userRef = doc(db, "users", uid);
+  const privateUserRef = doc(db, "privateUsers", uid);
+
+  await runTransaction(db, async (tx) => {
+    tx.set(
+      privateUserRef,
+      { firstName, lastName, updatedAt: serverTimestamp() },
+      { merge: true },
+    );
+    tx.set(
+      userRef,
+      {
+        firstName: deleteField(),
+        lastName: deleteField(),
+        hasLegalName: true,
+      },
+      { merge: true },
+    );
+  });
 }
 
 export function validateUsernameFormat(raw: string): { username: string; ok: true } {
@@ -124,6 +151,28 @@ export async function ensureGoogleUserHasUsername(params: {
       await runTransaction(db, async (tx) => {
         const uSnap = await tx.get(userRef);
         if (uSnap.exists()) {
+          const legacyLegalName = legacyLegalNameFromData(uSnap.data() as {
+            firstName?: unknown;
+            lastName?: unknown;
+          });
+          if (legacyLegalName) {
+            tx.set(
+              doc(db, "privateUsers", uid),
+              { ...legacyLegalName, updatedAt: serverTimestamp() },
+              { merge: true },
+            );
+            tx.set(
+              userRef,
+              {
+                firstName: deleteField(),
+                lastName: deleteField(),
+                hasLegalName: true,
+              },
+              { merge: true },
+            );
+          }
+        }
+        if (uSnap.exists()) {
           const existing = (uSnap.data() as { username?: string }).username;
           if (typeof existing === "string" && existing.trim()) {
             return;
@@ -176,6 +225,28 @@ export async function registerInitialUsername(
 
   await runTransaction(db, async (tx) => {
     const uSnap = await tx.get(userRef);
+    if (uSnap.exists()) {
+      const legacyLegalName = legacyLegalNameFromData(uSnap.data() as {
+        firstName?: unknown;
+        lastName?: unknown;
+      });
+      if (legacyLegalName) {
+        tx.set(
+          doc(db, "privateUsers", uid),
+          { ...legacyLegalName, updatedAt: serverTimestamp() },
+          { merge: true },
+        );
+        tx.set(
+          userRef,
+          {
+            firstName: deleteField(),
+            lastName: deleteField(),
+            hasLegalName: true,
+          },
+          { merge: true },
+        );
+      }
+    }
     if (uSnap.exists()) {
       const existing = (uSnap.data() as { username?: string }).username;
       if (typeof existing === "string" && existing.trim()) {

@@ -27,6 +27,14 @@
       await storageRemove([STORAGE_KEY, "user"]);
       return null;
     }
+    const existing = await getStoredSession();
+    if (
+      existing?.idToken &&
+      existing.uid === session.uid &&
+      Number(existing.expiresAt || 0) > Number(session.expiresAt || 0)
+    ) {
+      return existing;
+    }
     await storageSet({
       [STORAGE_KEY]: session,
       user: { uid: session.uid, email: session.email || "" },
