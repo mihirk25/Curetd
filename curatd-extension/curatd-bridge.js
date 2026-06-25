@@ -82,13 +82,13 @@
     try {
       db = await openDb();
     } catch {
-      return null;
+      return { ok: false, session: null };
     }
 
     try {
       const direct = await getByKey(db, AUTH_KEY);
       const fromDirect = parseAuthEntry(direct);
-      if (fromDirect) return fromDirect;
+      if (fromDirect) return { ok: true, session: fromDirect };
 
       const rows = await getAllFromStore(db);
       for (const row of rows) {
@@ -98,7 +98,7 @@
             : null;
         if (rowKey === AUTH_KEY) {
           const session = parseAuthEntry(row);
-          if (session) return session;
+          if (session) return { ok: true, session };
         }
       }
 
@@ -109,20 +109,22 @@
             : null;
         if (rowKey && String(rowKey).startsWith("firebase:authUser:")) {
           const session = parseAuthEntry(row);
-          if (session) return session;
+          if (session) return { ok: true, session };
         }
       }
 
-      return null;
+      return { ok: true, session: null };
     } catch {
-      return null;
+      return { ok: false, session: null };
     } finally {
       db.close();
     }
   }
 
   async function syncSession() {
-    const session = await readSessionFromIndexedDB();
+    const result = await readSessionFromIndexedDB();
+    if (!result.ok) return;
+    const session = result.session;
     const payload = session ? JSON.stringify(session) : "";
     if (payload === lastPayload) return;
     lastPayload = payload;
