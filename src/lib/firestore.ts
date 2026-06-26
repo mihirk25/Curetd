@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -19,10 +20,14 @@ const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 export function profileNeedsLegalName(data: {
   firstName?: unknown;
   lastName?: unknown;
+  hasLegalName?: unknown;
 } | null): boolean {
+  if (data?.hasLegalName === true) {
+    return false;
+  }
   const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
   const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
-  return !firstName || !lastName;
+  return !(firstName && lastName);
 }
 
 /** Internal-only profile fields — never shown in public UI. */
@@ -59,11 +64,25 @@ export async function saveUserLegalName(
   if (!firstName || !lastName) {
     throw new Error("INVALID_NAME");
   }
+  await setDoc(doc(db, "privateUsers", uid), { firstName, lastName, updatedAt: serverTimestamp() }, { merge: true });
   await setDoc(
     doc(db, "users", uid),
-    { firstName, lastName },
+    { hasLegalName: true, firstName: deleteField(), lastName: deleteField() },
     { merge: true },
   );
+}
+
+export async function migratePublicLegalName(
+  uid: string,
+  data: { firstName?: unknown; lastName?: unknown } | null,
+): Promise<boolean> {
+  const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
+  const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
+  if (!firstName || !lastName) {
+    return false;
+  }
+  await saveUserLegalName(uid, { firstName, lastName });
+  return true;
 }
 
 export function validateUsernameFormat(raw: string): { username: string; ok: true } {

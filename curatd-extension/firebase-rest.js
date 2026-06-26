@@ -237,21 +237,38 @@
     return fields;
   }
 
-  async function createClip(fields) {
-    const doc = await firestoreRequest("/clips", {
-      method: "POST",
-      body: JSON.stringify({ fields: buildFieldsObject(fields) }),
-    });
-    return docIdFromName(doc.name);
+  function safeDocIdPart(value) {
+    return encodeURIComponent(String(value || "").trim()).replace(/\./g, "%2E");
   }
 
-  async function patchClip(docId, fields) {
-    const mask = Object.keys(fields)
-      .map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`)
-      .join("&");
-    await firestoreRequest(`/clips/${encodeURIComponent(docId)}?${mask}`, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: buildFieldsObject(fields) }),
+  function extensionClipDocId(uid, videoId) {
+    return `ext_${safeDocIdPart(uid)}_${safeDocIdPart(videoId)}_video`;
+  }
+
+  async function commitClipAppend(docId, fields, moment, deleteFieldPaths = []) {
+    const { projectId } = cfg();
+    const fieldPaths = [...Object.keys(fields), ...deleteFieldPaths];
+    await firestoreRequest(":commit", {
+      method: "POST",
+      body: JSON.stringify({
+        writes: [
+          {
+            update: {
+              name: `projects/${projectId}/databases/(default)/documents/clips/${docId}`,
+              fields: buildFieldsObject(fields),
+            },
+            updateMask: { fieldPaths },
+            updateTransforms: [
+              {
+                fieldPath: "moments",
+                appendMissingElements: {
+                  values: [encodeValue(moment)],
+                },
+              },
+            ],
+          },
+        ],
+      }),
     });
   }
 
@@ -288,9 +305,7 @@
     const existing = await findExistingClip(session.uid, videoId);
 
     if (existing) {
-      const moments = Array.isArray(existing.data.moments) ? [...existing.data.moments] : [];
-      moments.push(moment);
-      await patchClip(existing.id, {
+      await commitClipAppend(existing.id, {
         title: videoTitle,
         channelName,
         videoId,
@@ -300,16 +315,15 @@
         displayName,
         source: "extension",
         curatorId: session.uid,
-        curatorEmail: session.email || "",
         videoTitle,
         startTime,
         endTime,
-        moments,
-      });
+      }, moment, ["curatorEmail"]);
       return { ok: true, clipId: existing.id, merged: true };
     }
 
-    const clipId = await createClip({
+    const clipId = extensionClipDocId(session.uid, videoId);
+    await commitClipAppend(clipId, {
       videoId,
       videoTitle,
       videoUrl,
@@ -318,15 +332,13 @@
       startTime,
       endTime,
       curatorId: session.uid,
-      curatorEmail: session.email || "",
       userId: session.uid,
       username,
       displayName,
       audioOnly: false,
       createdAt: new Date().toISOString(),
       source: "extension",
-      moments: [moment],
-    });
+    }, moment);
 
     return { ok: true, clipId, merged: false };
   }

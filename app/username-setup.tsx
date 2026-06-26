@@ -6,6 +6,7 @@ import { db } from "../firebase";
 import { useAuth } from "./auth-context";
 import {
   ensureGoogleUserHasUsername,
+  migratePublicLegalName,
   profileNeedsLegalName,
   registerInitialUsername,
   saveUserLegalName,
@@ -78,6 +79,8 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
     }
 
     const userRef = doc(db, "users", user.uid);
+    let cancelled = false;
+    let legalNameMigrationStarted = false;
     const unsub = onSnapshot(
       userRef,
       (snap) => {
@@ -88,6 +91,15 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
             : null;
         setUsername(v);
         setNeedsNames(profileNeedsLegalName(data));
+        const publicFirstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
+        const publicLastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
+        const hasPublicLegalName = Boolean(publicFirstName && publicLastName);
+        if (hasPublicLegalName && !legalNameMigrationStarted) {
+          legalNameMigrationStarted = true;
+          void migratePublicLegalName(user.uid, data).catch(() => {
+            if (!cancelled) legalNameMigrationStarted = false;
+          });
+        }
       },
       () => {
         setUsername(null);
@@ -95,7 +107,6 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
       },
     );
 
-    let cancelled = false;
     setChecking(true);
     void (async () => {
       try {
