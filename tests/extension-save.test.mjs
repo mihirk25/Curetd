@@ -35,7 +35,7 @@ function loadExtension({ runQueryRows = [] } = {}) {
           refreshToken: "refresh-token",
           uid: "alice",
           email: "alice@example.com",
-          expiresAt: Date.now() + 60_000,
+          expiresAt: Date.now() + 120_000,
         };
       },
       async saveSession() {},
