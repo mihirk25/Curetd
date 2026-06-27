@@ -237,6 +237,11 @@
     return fields;
   }
 
+  function clipDocumentName(docId) {
+    const { projectId } = cfg();
+    return `projects/${projectId}/databases/(default)/documents/clips/${docId}`;
+  }
+
   async function createClip(fields) {
     const doc = await firestoreRequest("/clips", {
       method: "POST",
@@ -245,13 +250,29 @@
     return docIdFromName(doc.name);
   }
 
-  async function patchClip(docId, fields) {
-    const mask = Object.keys(fields)
-      .map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`)
-      .join("&");
-    await firestoreRequest(`/clips/${encodeURIComponent(docId)}?${mask}`, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: buildFieldsObject(fields) }),
+  async function appendMomentToClip(docId, fields, moment) {
+    const fieldPaths = [...Object.keys(fields), "curatorEmail"];
+    await firestoreRequest(":commit", {
+      method: "POST",
+      body: JSON.stringify({
+        writes: [
+          {
+            update: {
+              name: clipDocumentName(docId),
+              fields: buildFieldsObject(fields),
+            },
+            updateMask: { fieldPaths },
+            updateTransforms: [
+              {
+                fieldPath: "moments",
+                appendMissingElements: {
+                  values: [encodeValue(moment)],
+                },
+              },
+            ],
+          },
+        ],
+      }),
     });
   }
 
@@ -288,9 +309,7 @@
     const existing = await findExistingClip(session.uid, videoId);
 
     if (existing) {
-      const moments = Array.isArray(existing.data.moments) ? [...existing.data.moments] : [];
-      moments.push(moment);
-      await patchClip(existing.id, {
+      await appendMomentToClip(existing.id, {
         title: videoTitle,
         channelName,
         videoId,
@@ -300,12 +319,10 @@
         displayName,
         source: "extension",
         curatorId: session.uid,
-        curatorEmail: session.email || "",
         videoTitle,
         startTime,
         endTime,
-        moments,
-      });
+      }, moment);
       return { ok: true, clipId: existing.id, merged: true };
     }
 
@@ -318,7 +335,6 @@
       startTime,
       endTime,
       curatorId: session.uid,
-      curatorEmail: session.email || "",
       userId: session.uid,
       username,
       displayName,

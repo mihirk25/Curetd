@@ -621,6 +621,10 @@ function extractVideoId(url: string) {
   return null;
 }
 
+function savedClipDocId(uid: string, clipId: string) {
+  return `${uid}_${clipId}`;
+}
+
 function parseYoutubeTimestampSeconds(tRaw: string): number | null {
   const v = decodeURIComponent(String(tRaw || "").trim());
   if (!v) return null;
@@ -1014,8 +1018,16 @@ export default function CuratdMVP() {
       setSavedClips([]);
       return;
     }
-    const unsubscribeSaved = onSnapshot(collection(db, "savedClips"), (snapshot) => {
-      setSavedClips(snapshot.docs.map((d) => d.id));
+    const savedQ = query(collection(db, "savedClips"), where("userId", "==", user.uid));
+    const unsubscribeSaved = onSnapshot(savedQ, (snapshot) => {
+      setSavedClips(
+        snapshot.docs
+          .map((d) => {
+            const data = d.data() as { clipId?: unknown };
+            return typeof data.clipId === "string" && data.clipId ? data.clipId : null;
+          })
+          .filter((id): id is string => Boolean(id)),
+      );
     });
     return () => {
       unsubscribeSaved();
@@ -3567,10 +3579,17 @@ export default function CuratdMVP() {
                                 return;
                               }
                               try {
+                                const clipId = String(clip.id || "");
+                                if (!clipId) return;
+                                const savedRef = doc(db, "savedClips", savedClipDocId(user.uid, clipId));
                                 if (isSaved) {
-                                  await deleteDoc(doc(db, "savedClips", clip.id));
+                                  await deleteDoc(savedRef);
                                 } else {
-                                  await setDoc(doc(db, "savedClips", clip.id), { clipId: clip.id, savedAt: serverTimestamp() });
+                                  await setDoc(savedRef, {
+                                    userId: user.uid,
+                                    clipId,
+                                    savedAt: serverTimestamp(),
+                                  });
                                 }
                               } catch (e) {
                                 // silent
