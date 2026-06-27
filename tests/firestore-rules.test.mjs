@@ -67,6 +67,7 @@ try {
   const bob = testEnv.authenticatedContext("bob").firestore();
   const mallory = testEnv.authenticatedContext("mallory").firestore();
 
+  await assertSucceeds(getDoc(doc(alice, "users", "alice")));
   await assertFails(getDoc(doc(anon, "users", "victim")));
   await assertSucceeds(getDoc(doc(anon, "users", "publicUser")));
   await assertSucceeds(getDoc(doc(alice, "privateUsers", "alice")));

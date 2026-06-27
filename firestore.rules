@@ -63,7 +63,7 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if hasNoPublicLegalName(resource.data) || isOwner(userId);
+      allow read: if isOwner(userId) || hasNoPublicLegalName(resource.data);
       allow create, update: if isOwner(userId) && userWriteHasNoPublicLegalName();
       allow delete: if false;
     }
