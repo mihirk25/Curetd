@@ -6,6 +6,7 @@ import { db } from "../firebase";
 import { useAuth } from "./auth-context";
 import {
   ensureGoogleUserHasUsername,
+  getLegacyLegalName,
   profileNeedsLegalName,
   registerInitialUsername,
   saveUserLegalName,
@@ -86,6 +87,12 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
           data?.username && String(data.username).trim()
             ? String(data.username).toLowerCase()
             : null;
+        const legacyLegalName = getLegacyLegalName(data);
+        if (legacyLegalName) {
+          void saveUserLegalName(user.uid, legacyLegalName).catch(() => {
+            // Keep onboarding usable; privacy rules fail closed for public reads until migration succeeds.
+          });
+        }
         setUsername(v);
         setNeedsNames(profileNeedsLegalName(data));
       },
