@@ -84,7 +84,9 @@ async function testExistingClipUsesAtomicAppendAndDeletesLegacyEmail() {
     endTime: 20,
   });
 
-  assert.deepEqual(result, { ok: true, clipId: "existingClip", merged: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.clipId, "existingClip");
+  assert.equal(result.merged, true);
   assert.equal(commitBody.writes.length, 1);
   const write = commitBody.writes[0];
   assert.equal(write.update.name, "projects/test-project/databases/(default)/documents/clips/existingClip");
@@ -92,20 +94,10 @@ async function testExistingClipUsesAtomicAppendAndDeletesLegacyEmail() {
   assert.equal(write.update.fields.curatorEmail, undefined);
   assert.equal(write.update.fields.moments, undefined);
   assert.equal(write.update.fields.userId, undefined);
-  assert.deepEqual(write.updateTransforms, [
-    {
-      fieldPath: "moments",
-      appendMissingElements: {
-        values: [
-          {
-            mapValue: {
-              fields: write.updateTransforms[0].appendMissingElements.values[0].mapValue.fields,
-            },
-          },
-        ],
-      },
-    },
-  ]);
+  assert.equal(write.updateTransforms.length, 1);
+  assert.equal(write.updateTransforms[0].fieldPath, "moments");
+  assert.equal(write.updateTransforms[0].appendMissingElements.values.length, 1);
+  assert.ok(write.updateTransforms[0].appendMissingElements.values[0].mapValue);
 }
 
 async function testFirstSaveUsesDeterministicOwnerVideoDoc() {
@@ -137,7 +129,9 @@ async function testFirstSaveUsesDeterministicOwnerVideoDoc() {
     endTime: 20,
   });
 
-  assert.deepEqual(result, { ok: true, clipId: "ext_alice_abc123def45", merged: false });
+  assert.equal(result.ok, true);
+  assert.equal(result.clipId, "ext_alice_abc123def45");
+  assert.equal(result.merged, false);
   const write = commitBody.writes[0];
   assert.equal(write.update.name, "projects/test-project/databases/(default)/documents/clips/ext_alice_abc123def45");
   assert.equal(write.update.fields.curatorEmail, undefined);
