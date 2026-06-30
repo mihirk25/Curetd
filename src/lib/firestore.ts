@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -8,6 +9,7 @@ import {
   runTransaction,
   serverTimestamp,
   setDoc,
+  writeBatch,
   where,
 } from "firebase/firestore";
 import { db } from "../../firebase";
@@ -16,13 +18,25 @@ export const USERNAME_TAKEN = "USERNAME_TAKEN";
 
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 
+type LegalNameData = {
+  firstName?: unknown;
+  lastName?: unknown;
+  hasLegalName?: unknown;
+} | null;
+
+function hasCompleteLegalName(data: LegalNameData): data is { firstName: string; lastName: string } {
+  const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
+  const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
+  return Boolean(firstName && lastName);
+}
+
 export function profileNeedsLegalName(data: {
   firstName?: unknown;
   lastName?: unknown;
+  hasLegalName?: unknown;
 } | null): boolean {
-  const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
-  const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
-  return !firstName || !lastName;
+  if (data?.hasLegalName === true) return false;
+  return !hasCompleteLegalName(data);
 }
 
 /** Internal-only profile fields — never shown in public UI. */
@@ -59,11 +73,50 @@ export async function saveUserLegalName(
   if (!firstName || !lastName) {
     throw new Error("INVALID_NAME");
   }
-  await setDoc(
-    doc(db, "users", uid),
-    { firstName, lastName },
+  const batch = writeBatch(db);
+  const privateRef = doc(db, "privateUsers", uid);
+  const publicRef = doc(db, "users", uid);
+  batch.set(
+    privateRef,
+    { firstName, lastName, updatedAt: serverTimestamp() },
     { merge: true },
   );
+  batch.set(
+    publicRef,
+    {
+      hasLegalName: true,
+      firstName: deleteField(),
+      lastName: deleteField(),
+    },
+    { merge: true },
+  );
+  await batch.commit();
+}
+
+export async function ensurePrivateLegalNameState(uid: string): Promise<boolean> {
+  const privateRef = doc(db, "privateUsers", uid);
+  const privateSnap = await getDoc(privateRef);
+  if (hasCompleteLegalName(privateSnap.exists() ? (privateSnap.data() as LegalNameData) : null)) {
+    await setDoc(
+      doc(db, "users", uid),
+      { hasLegalName: true, firstName: deleteField(), lastName: deleteField() },
+      { merge: true },
+    );
+    return true;
+  }
+
+  const publicRef = doc(db, "users", uid);
+  const publicSnap = await getDoc(publicRef);
+  const publicData = publicSnap.exists() ? (publicSnap.data() as LegalNameData) : null;
+  if (hasCompleteLegalName(publicData)) {
+    await saveUserLegalName(uid, {
+      firstName: publicData.firstName,
+      lastName: publicData.lastName,
+    });
+    return true;
+  }
+
+  return publicData?.hasLegalName === true;
 }
 
 export function validateUsernameFormat(raw: string): { username: string; ok: true } {
