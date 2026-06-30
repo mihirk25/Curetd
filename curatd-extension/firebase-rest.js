@@ -281,8 +281,6 @@
       },
     ]);
   }
-    });
-  }
 
   async function saveClip(data) {
     const session = await getValidSession();
