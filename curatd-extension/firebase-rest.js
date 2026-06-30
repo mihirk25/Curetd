@@ -69,6 +69,19 @@
     return parts[parts.length - 1] || "";
   }
 
+  function deterministicClipId(uid, videoId, audioOnly) {
+    const safe = (value) =>
+      String(value || "")
+        .replace(/[^A-Za-z0-9_-]/g, "_")
+        .slice(0, 100) || "unknown";
+    return `${safe(uid)}_${audioOnly ? "audio" : "video"}_${safe(videoId)}`;
+  }
+
+  function documentName(collectionId, docId) {
+    const { projectId } = cfg();
+    return `projects/${projectId}/databases/(default)/documents/${collectionId}/${docId}`;
+  }
+
   async function refreshSession(session) {
     const { apiKey } = cfg();
     const res = await fetch(
@@ -237,22 +250,36 @@
     return fields;
   }
 
-  async function createClip(fields) {
-    const doc = await firestoreRequest("/clips", {
-      method: "POST",
-      body: JSON.stringify({ fields: buildFieldsObject(fields) }),
-    });
-    return docIdFromName(doc.name);
+  async function commitWrites(writes) {
+    const { projectId } = cfg();
+    await firestoreRequest(
+      `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:commit`,
+      {
+        method: "POST",
+        body: JSON.stringify({ writes }),
+      },
+    );
   }
 
-  async function patchClip(docId, fields) {
-    const mask = Object.keys(fields)
-      .map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`)
-      .join("&");
-    await firestoreRequest(`/clips/${encodeURIComponent(docId)}?${mask}`, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: buildFieldsObject(fields) }),
-    });
+  async function upsertClipWithMoment(docId, fields, moment) {
+    const fieldPaths = [...Object.keys(fields), "curatorEmail"];
+    await commitWrites([
+      {
+        update: {
+          name: documentName("clips", docId),
+          fields: buildFieldsObject(fields),
+        },
+        updateMask: { fieldPaths },
+        updateTransforms: [
+          {
+            fieldPath: "moments",
+            appendMissingElements: {
+              values: [encodeValue(moment)],
+            },
+          },
+        ],
+      },
+    ]);
   }
 
   async function saveClip(data) {
@@ -286,30 +313,9 @@
 
     const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
     const existing = await findExistingClip(session.uid, videoId);
+    const clipId = existing?.id || deterministicClipId(session.uid, videoId, false);
 
-    if (existing) {
-      const moments = Array.isArray(existing.data.moments) ? [...existing.data.moments] : [];
-      moments.push(moment);
-      await patchClip(existing.id, {
-        title: videoTitle,
-        channelName,
-        videoId,
-        videoUrl,
-        audioOnly: false,
-        username,
-        displayName,
-        source: "extension",
-        curatorId: session.uid,
-        curatorEmail: session.email || "",
-        videoTitle,
-        startTime,
-        endTime,
-        moments,
-      });
-      return { ok: true, clipId: existing.id, merged: true };
-    }
-
-    const clipId = await createClip({
+    const fields = {
       videoId,
       videoTitle,
       videoUrl,
@@ -318,17 +324,20 @@
       startTime,
       endTime,
       curatorId: session.uid,
-      curatorEmail: session.email || "",
       userId: session.uid,
       username,
       displayName,
       audioOnly: false,
-      createdAt: new Date().toISOString(),
       source: "extension",
-      moments: [moment],
-    });
+    };
 
-    return { ok: true, clipId, merged: false };
+    if (!existing) {
+      fields.createdAt = new Date().toISOString();
+    }
+
+    await upsertClipWithMoment(clipId, fields, moment);
+
+    return { ok: true, clipId, merged: Boolean(existing) };
   }
 
   globalScope.CuratdFirebaseRest = {

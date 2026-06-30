@@ -5,6 +5,7 @@ import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "./auth-context";
 import {
+  ensurePrivateLegalNameState,
   ensureGoogleUserHasUsername,
   profileNeedsLegalName,
   registerInitialUsername,
@@ -104,6 +105,10 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
           email: user.email,
           photoURL: user.photoURL,
         });
+        const hasLegalName = await ensurePrivateLegalNameState(user.uid);
+        if (!cancelled) {
+          setNeedsNames(!hasLegalName);
+        }
       } catch {
         // Firestore rules or offline; snapshot + onboarding flow still apply
       } finally {
