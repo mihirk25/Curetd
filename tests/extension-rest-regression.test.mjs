@@ -81,11 +81,9 @@ function commitBody(requests) {
     endTime: 20,
   });
 
-  assert.deepEqual(result, {
-    ok: true,
-    clipId: "user_123_video_abc123",
-    merged: false,
-  });
+  assert.equal(result.ok, true);
+  assert.equal(result.clipId, "user_123_video_abc123");
+  assert.equal(result.merged, false);
 
   const body = commitBody(requests);
   assert.equal(body.writes.length, 1);

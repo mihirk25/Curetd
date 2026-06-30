@@ -8,7 +8,6 @@ import {
 import {
   addDoc,
   collection,
-  deleteDoc,
   doc,
   getDoc,
   serverTimestamp,
