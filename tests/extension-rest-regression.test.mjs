@@ -102,7 +102,7 @@ function commitBody(requests) {
   assert.deepEqual(appendedMoment.endTime, { integerValue: "20" });
   assert.deepEqual(appendedMoment.note, { stringValue: "" });
   assert.deepEqual(appendedMoment.topic, { stringValue: "General" });
-  assert.match(appendedMoment.addedAt.timestampValue, /^\d{4}-\d{2}-\d{2}T/);
+  assert.match(appendedMoment.addedAt.stringValue, /^\d{4}-\d{2}-\d{2}T/);
   const fields = write.update.fields;
   assert.equal(fields.userId.stringValue, "user_123");
   assert.equal(fields.curatorEmail, undefined);
