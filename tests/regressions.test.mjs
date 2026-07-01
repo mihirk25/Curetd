@@ -65,7 +65,7 @@ test("extension save uses atomic moment append and never writes email", async ()
           refreshToken: "refresh",
           uid: "user_1",
           email: "private@example.com",
-          expiresAt: Date.now() + 60_000,
+          expiresAt: Date.now() + 120_000,
         };
       },
       async saveSession() {},
