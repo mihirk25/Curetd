@@ -275,24 +275,6 @@
     });
   }
 
-  async function createClip(fields) {
-    const doc = await firestoreRequest("/clips", {
-      method: "POST",
-      body: JSON.stringify({ fields: buildFieldsObject(fields) }),
-    });
-    return docIdFromName(doc.name);
-  }
-
-  async function patchClip(docId, fields) {
-    const mask = Object.keys(fields)
-      .map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`)
-      .join("&");
-    await firestoreRequest(`/clips/${encodeURIComponent(docId)}?${mask}`, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: buildFieldsObject(fields) }),
-    });
-  }
-
   async function saveClip(data) {
     const session = await getValidSession();
     if (!session) {
