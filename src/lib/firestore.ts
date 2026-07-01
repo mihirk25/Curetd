@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -16,13 +17,24 @@ export const USERNAME_TAKEN = "USERNAME_TAKEN";
 
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 
-export function profileNeedsLegalName(data: {
+type PublicUserProfile = {
+  hasLegalName?: unknown;
   firstName?: unknown;
   lastName?: unknown;
-} | null): boolean {
+} | null;
+
+function getLegacyLegalName(data: PublicUserProfile): { firstName: string; lastName: string } | null {
   const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
   const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
-  return !firstName || !lastName;
+  return firstName && lastName ? { firstName, lastName } : null;
+}
+
+export function profileHasLegacyLegalName(data: PublicUserProfile): boolean {
+  return getLegacyLegalName(data) != null;
+}
+
+export function profileNeedsLegalName(data: PublicUserProfile): boolean {
+  return data?.hasLegalName !== true && !getLegacyLegalName(data);
 }
 
 /** Internal-only profile fields — never shown in public UI. */
@@ -60,8 +72,31 @@ export async function saveUserLegalName(
     throw new Error("INVALID_NAME");
   }
   await setDoc(
+    doc(db, "privateUsers", uid),
+    { firstName, lastName, updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+  await setDoc(
     doc(db, "users", uid),
-    { firstName, lastName },
+    { hasLegalName: true, firstName: deleteField(), lastName: deleteField() },
+    { merge: true },
+  );
+}
+
+export async function migrateLegacyUserLegalName(
+  uid: string,
+  data: PublicUserProfile,
+): Promise<void> {
+  const legacy = getLegacyLegalName(data);
+  if (!legacy) return;
+  await setDoc(
+    doc(db, "privateUsers", uid),
+    { ...legacy, updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+  await setDoc(
+    doc(db, "users", uid),
+    { hasLegalName: true, firstName: deleteField(), lastName: deleteField() },
     { merge: true },
   );
 }
