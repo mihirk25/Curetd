@@ -237,6 +237,44 @@
     return fields;
   }
 
+  function deterministicClipId(uid, videoId) {
+    const safeUid = String(uid || "").replace(/[^A-Za-z0-9_-]/g, "_");
+    const safeVideoId = String(videoId || "").replace(/[^A-Za-z0-9_-]/g, "_");
+    return `ext_${safeUid}_${safeVideoId}`;
+  }
+
+  async function commitClipMoment(docId, fields, moment) {
+    const { projectId } = cfg();
+    const documentName = `projects/${projectId}/databases/(default)/documents/clips/${docId}`;
+    const updateMask = Object.keys(fields);
+    if (!updateMask.includes("curatorEmail")) updateMask.push("curatorEmail");
+
+    await firestoreRequest(":commit", {
+      method: "POST",
+      body: JSON.stringify({
+        writes: [
+          {
+            update: {
+              name: documentName,
+              fields: buildFieldsObject(fields),
+            },
+            updateMask: {
+              fieldPaths: updateMask,
+            },
+            updateTransforms: [
+              {
+                fieldPath: "moments",
+                appendMissingElements: {
+                  values: [encodeValue(moment)],
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+  }
+
   async function createClip(fields) {
     const doc = await firestoreRequest("/clips", {
       method: "POST",
@@ -286,30 +324,8 @@
 
     const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
     const existing = await findExistingClip(session.uid, videoId);
-
-    if (existing) {
-      const moments = Array.isArray(existing.data.moments) ? [...existing.data.moments] : [];
-      moments.push(moment);
-      await patchClip(existing.id, {
-        title: videoTitle,
-        channelName,
-        videoId,
-        videoUrl,
-        audioOnly: false,
-        username,
-        displayName,
-        source: "extension",
-        curatorId: session.uid,
-        curatorEmail: session.email || "",
-        videoTitle,
-        startTime,
-        endTime,
-        moments,
-      });
-      return { ok: true, clipId: existing.id, merged: true };
-    }
-
-    const clipId = await createClip({
+    const clipId = existing?.id || deterministicClipId(session.uid, videoId);
+    await commitClipMoment(clipId, {
       videoId,
       videoTitle,
       videoUrl,
@@ -318,17 +334,16 @@
       startTime,
       endTime,
       curatorId: session.uid,
-      curatorEmail: session.email || "",
       userId: session.uid,
       username,
       displayName,
       audioOnly: false,
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       source: "extension",
-      moments: [moment],
-    });
+    }, moment);
 
-    return { ok: true, clipId, merged: false };
+    return { ok: true, clipId, merged: Boolean(existing) };
   }
 
   globalScope.CuratdFirebaseRest = {

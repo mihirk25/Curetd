@@ -78,7 +78,7 @@ export default function SettingsPage() {
   const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    if (!user) setShowAuthModal(true);
+    setShowAuthModal(!user);
   }, [user]);
 
   const handlePhotoSelected = useCallback(
