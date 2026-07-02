@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -9,6 +10,7 @@ import {
   serverTimestamp,
   setDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 
@@ -19,10 +21,21 @@ const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 export function profileNeedsLegalName(data: {
   firstName?: unknown;
   lastName?: unknown;
+  hasLegalName?: unknown;
 } | null): boolean {
+  if (data?.hasLegalName === true) return false;
   const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
   const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
   return !firstName || !lastName;
+}
+
+function readLegacyLegalName(data: {
+  firstName?: unknown;
+  lastName?: unknown;
+} | null): { firstName: string; lastName: string } | null {
+  const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
+  const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
+  return firstName && lastName ? { firstName, lastName } : null;
 }
 
 /** Internal-only profile fields — never shown in public UI. */
@@ -59,11 +72,47 @@ export async function saveUserLegalName(
   if (!firstName || !lastName) {
     throw new Error("INVALID_NAME");
   }
-  await setDoc(
-    doc(db, "users", uid),
-    { firstName, lastName },
+  const batch = writeBatch(db);
+  batch.set(
+    doc(db, "privateUsers", uid),
+    { firstName, lastName, updatedAt: serverTimestamp() },
     { merge: true },
   );
+  batch.set(
+    doc(db, "users", uid),
+    {
+      hasLegalName: true,
+      firstName: deleteField(),
+      lastName: deleteField(),
+    },
+    { merge: true },
+  );
+  await batch.commit();
+}
+
+export async function migrateLegacyLegalName(uid: string): Promise<void> {
+  if (!uid) return;
+  const userRef = doc(db, "users", uid);
+  const snap = await getDoc(userRef);
+  const legacy = snap.exists() ? readLegacyLegalName(snap.data() as { firstName?: unknown; lastName?: unknown }) : null;
+  if (!legacy) return;
+
+  const batch = writeBatch(db);
+  batch.set(
+    doc(db, "privateUsers", uid),
+    { ...legacy, updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+  batch.set(
+    userRef,
+    {
+      hasLegalName: true,
+      firstName: deleteField(),
+      lastName: deleteField(),
+    },
+    { merge: true },
+  );
+  await batch.commit();
 }
 
 export function validateUsernameFormat(raw: string): { username: string; ok: true } {
