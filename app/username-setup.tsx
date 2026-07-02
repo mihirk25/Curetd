@@ -6,6 +6,7 @@ import { db } from "../firebase";
 import { useAuth } from "./auth-context";
 import {
   ensureGoogleUserHasUsername,
+  migrateLegacyLegalName,
   profileNeedsLegalName,
   registerInitialUsername,
   saveUserLegalName,
@@ -88,6 +89,9 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
             : null;
         setUsername(v);
         setNeedsNames(profileNeedsLegalName(data));
+        if (data?.firstName || data?.lastName) {
+          void migrateLegacyLegalName(user.uid).catch(() => {});
+        }
       },
       () => {
         setUsername(null);
