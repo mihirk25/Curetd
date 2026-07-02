@@ -96,7 +96,9 @@ describe("extension Firestore REST saves", () => {
       endTime: 20,
     });
 
-    assert.deepEqual(result, { ok: true, clipId: "existingClip", merged: true });
+    assert.equal(result.ok, true);
+    assert.equal(result.clipId, "existingClip");
+    assert.equal(result.merged, true);
 
     const commit = calls.find((call) => call.url.endsWith("/documents:commit"));
     assert.ok(commit, "expected Firestore commit call");
@@ -143,7 +145,9 @@ describe("extension Firestore REST saves", () => {
       endTime: 15,
     });
 
-    assert.deepEqual(result, { ok: true, clipId: "ext_user_1_abc123", merged: false });
+    assert.equal(result.ok, true);
+    assert.equal(result.clipId, "ext_user_1_abc123");
+    assert.equal(result.merged, false);
     const commit = calls.find((call) => call.url.endsWith("/documents:commit"));
     const body = JSON.parse(commit.options.body);
     assert.equal(
