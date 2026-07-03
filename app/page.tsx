@@ -1014,8 +1014,16 @@ export default function CuratdMVP() {
       setSavedClips([]);
       return;
     }
-    const unsubscribeSaved = onSnapshot(collection(db, "savedClips"), (snapshot) => {
-      setSavedClips(snapshot.docs.map((d) => d.id));
+    const savedQuery = query(collection(db, "savedClips"), where("userId", "==", user.uid));
+    const unsubscribeSaved = onSnapshot(savedQuery, (snapshot) => {
+      setSavedClips(
+        snapshot.docs
+          .map((d) => {
+            const data = d.data() as { clipId?: unknown };
+            return typeof data.clipId === "string" && data.clipId ? data.clipId : null;
+          })
+          .filter((id): id is string => Boolean(id)),
+      );
     });
     return () => {
       unsubscribeSaved();
@@ -3567,10 +3575,15 @@ export default function CuratdMVP() {
                                 return;
                               }
                               try {
+                                const savedDocId = `${user.uid}_${clip.id}`;
                                 if (isSaved) {
-                                  await deleteDoc(doc(db, "savedClips", clip.id));
+                                  await deleteDoc(doc(db, "savedClips", savedDocId));
                                 } else {
-                                  await setDoc(doc(db, "savedClips", clip.id), { clipId: clip.id, savedAt: serverTimestamp() });
+                                  await setDoc(doc(db, "savedClips", savedDocId), {
+                                    clipId: clip.id,
+                                    userId: user.uid,
+                                    savedAt: serverTimestamp(),
+                                  });
                                 }
                               } catch (e) {
                                 // silent
