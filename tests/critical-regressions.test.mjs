@@ -149,11 +149,15 @@ async function testExistingClipUsesAtomicMomentAppend() {
 }
 
 function testFirestoreRulesProtectPrivateAndParticipantData() {
+  const usersMatch = rulesSource.match(/match \/users\/\{userId\} \{([\s\S]*?)\n    \}/);
+  assert.ok(usersMatch, "expected users rule block");
+  const usersBlock = usersMatch[1];
+
   assert.match(rulesSource, /match \/privateUsers\/\{userId\}/);
   assert.match(rulesSource, /hasNoPublicPrivateFields/);
   assert.match(rulesSource, /firstName/);
   assert.match(rulesSource, /lastName/);
-  assert.doesNotMatch(rulesSource, /match \/users\/\{userId\} \{[\s\S]*?allow read: if true;/);
+  assert.doesNotMatch(usersBlock, /allow read: if true;/);
   assert.match(rulesSource, /request\.resource\.data\.keys\(\)\.hasAny\(\['curatorEmail'\]\)/);
   assert.match(rulesSource, /match \/savedClips\/\{id\} \{[\s\S]*resource\.data\.userId == request\.auth\.uid/);
   assert.match(rulesSource, /participantIn\(resource\.data\)/);
