@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -17,9 +18,13 @@ export const USERNAME_TAKEN = "USERNAME_TAKEN";
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
 
 export function profileNeedsLegalName(data: {
+  hasLegalName?: unknown;
   firstName?: unknown;
   lastName?: unknown;
 } | null): boolean {
+  if (data?.hasLegalName === true) {
+    return false;
+  }
   const firstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
   const lastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
   return !firstName || !lastName;
@@ -60,8 +65,17 @@ export async function saveUserLegalName(
     throw new Error("INVALID_NAME");
   }
   await setDoc(
-    doc(db, "users", uid),
+    doc(db, "privateUsers", uid),
     { firstName, lastName },
+    { merge: true },
+  );
+  await setDoc(
+    doc(db, "users", uid),
+    {
+      hasLegalName: true,
+      firstName: deleteField(),
+      lastName: deleteField(),
+    },
     { merge: true },
   );
 }

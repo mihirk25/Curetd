@@ -138,7 +138,10 @@
     }
     if (!res.ok) {
       const msg = data?.error?.message || `Firestore request failed (${res.status})`;
-      throw new Error(msg);
+      const err = new Error(msg);
+      err.status = res.status;
+      err.code = data?.error?.status || "";
+      throw err;
     }
     return data;
   }
@@ -170,8 +173,18 @@
   }
 
   async function getUserProfile(uid) {
-    const doc = await firestoreRequest(`/users/${encodeURIComponent(uid)}`);
-    const data = decodeDocument(doc);
+    let data = {};
+    try {
+      const doc = await firestoreRequest(`/users/${encodeURIComponent(uid)}`);
+      data = decodeDocument(doc);
+    } catch (err) {
+      const status = Number(err?.status || 0);
+      const code = String(err?.code || "");
+      const message = String(err?.message || err || "");
+      if (status !== 404 && code !== "NOT_FOUND" && !/not found/i.test(message)) {
+        throw err;
+      }
+    }
     const username =
       typeof data.username === "string" && data.username.trim()
         ? data.username.trim().toLowerCase()
@@ -245,14 +258,40 @@
     return docIdFromName(doc.name);
   }
 
-  async function patchClip(docId, fields) {
-    const mask = Object.keys(fields)
-      .map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`)
-      .join("&");
-    await firestoreRequest(`/clips/${encodeURIComponent(docId)}?${mask}`, {
-      method: "PATCH",
-      body: JSON.stringify({ fields: buildFieldsObject(fields) }),
-    });
+  async function commitClipMomentAppend(docId, fields, moment) {
+    const session = await getValidSession();
+    if (!session) {
+      throw new Error("Please sign in at curatd.live first, then try again.");
+    }
+    const { projectId } = cfg();
+    const docName = `projects/${projectId}/databases/(default)/documents/clips/${docId}`;
+    await firestoreRequest(
+      `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:commit`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          writes: [
+            {
+              update: {
+                name: docName,
+                fields: buildFieldsObject(fields),
+              },
+              updateMask: {
+                fieldPaths: Object.keys(fields),
+              },
+              updateTransforms: [
+                {
+                  fieldPath: "moments",
+                  appendMissingElements: {
+                    values: [encodeValue(moment)],
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+      },
+    );
   }
 
   async function saveClip(data) {
@@ -288,9 +327,7 @@
     const existing = await findExistingClip(session.uid, videoId);
 
     if (existing) {
-      const moments = Array.isArray(existing.data.moments) ? [...existing.data.moments] : [];
-      moments.push(moment);
-      await patchClip(existing.id, {
+      await commitClipMomentAppend(existing.id, {
         title: videoTitle,
         channelName,
         videoId,
@@ -300,12 +337,11 @@
         displayName,
         source: "extension",
         curatorId: session.uid,
-        curatorEmail: session.email || "",
+        userId: session.uid,
         videoTitle,
         startTime,
         endTime,
-        moments,
-      });
+      }, moment);
       return { ok: true, clipId: existing.id, merged: true };
     }
 
@@ -318,7 +354,6 @@
       startTime,
       endTime,
       curatorId: session.uid,
-      curatorEmail: session.email || "",
       userId: session.uid,
       username,
       displayName,
