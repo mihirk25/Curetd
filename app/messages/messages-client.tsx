@@ -21,7 +21,7 @@ import { db } from "../../firebase";
 import { useAuth } from "../auth-context";
 import { SignInCuratorModal } from "../sign-in-curator-modal";
 import { CuratorRequiredModal } from "../curator-required-modal";
-import { getConversationId, markConversationRead, sendMessage, type ConversationDoc } from "./messaging";
+import { getConversationId, markConversationRead, type ConversationDoc } from "./messaging";
 import { sendMessage as sendMessageViaFirestoreUtil, subscribeToMessages } from "../lib/firestore";
 import { NewMessageModal } from "../components/NewMessageModal";
 import { Navbar } from "../components/Navbar";
@@ -650,14 +650,9 @@ export function MessagesClient() {
         }
         await sendMessageViaFirestoreUtil(activeConversationId, user.uid, { type: "text", text: draft });
       } catch (e) {
-        // Fallback to legacy helper (kept for safety)
-        await sendMessage({
-          db,
-          conversationId: activeConversationId,
-          participants: [String(parts[0]), String(parts[1])] as [string, string],
-          senderId: user.uid,
-          text: draft,
-        });
+        // Avoid a second send path: addDoc may succeed before a later update fails.
+        console.error("sendMessage failed", e);
+        return;
       }
       setDraft("");
     } finally {

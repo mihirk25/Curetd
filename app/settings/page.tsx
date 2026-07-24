@@ -78,7 +78,7 @@ export default function SettingsPage() {
   const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    if (!user) setShowAuthModal(true);
+    setShowAuthModal(!user);
   }, [user]);
 
   const handlePhotoSelected = useCallback(
@@ -238,7 +238,13 @@ export default function SettingsPage() {
         )}
       </main>
 
-      <SignInCuratorModal open={showAuthModal} onClose={() => router.push("/")} />
+      <SignInCuratorModal
+        open={showAuthModal}
+        onClose={() => {
+          if (!user) router.push("/");
+          else setShowAuthModal(false);
+        }}
+      />
     </div>
   );
 }

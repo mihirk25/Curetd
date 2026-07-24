@@ -707,16 +707,18 @@ export default function PublicProfilePage() {
                             const convId = getConversationId(user.uid, profile.uid);
                             void (async () => {
                               try {
-                                await setDoc(
-                                  doc(db, "conversations", convId),
-                                  {
+                                const convRef = doc(db, "conversations", convId);
+                                const existing = await getDoc(convRef);
+                                // Only create missing conversations. Never reset lastMessage/unreadBy
+                                // on an existing thread (merge:true still overwrites those fields).
+                                if (!existing.exists()) {
+                                  await setDoc(convRef, {
                                     participants: [user.uid, profile.uid],
                                     unreadBy: { [user.uid]: 0, [profile.uid]: 0 },
                                     lastMessage: "",
                                     lastMessageAt: serverTimestamp(),
-                                  },
-                                  { merge: true },
-                                );
+                                  });
+                                }
                               } catch {}
                               router.push(`/messages?c=${encodeURIComponent(convId)}`);
                             })();
