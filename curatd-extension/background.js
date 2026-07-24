@@ -4,8 +4,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "CURATD_AUTH_SESSION") {
     const session = message.session || null;
     if (session?.idToken) {
-      CuratdAuth.saveSession(session)
-        .then(() => sendResponse({ ok: true }))
+      CuratdAuth.getStoredSession()
+        .then(async (existing) => {
+          // Never replace a newer stored token with an older bridge payload.
+          if (
+            existing?.idToken &&
+            Number(existing.expiresAt || 0) > Number(session.expiresAt || 0) + 5000
+          ) {
+            sendResponse({ ok: true, skipped: true });
+            return;
+          }
+          await CuratdAuth.saveSession(session);
+          sendResponse({ ok: true });
+        })
         .catch(() => sendResponse({ ok: false }));
     } else {
       CuratdAuth.clearSession()

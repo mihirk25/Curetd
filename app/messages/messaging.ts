@@ -11,14 +11,14 @@ import {
 export type ConversationDoc = {
   participants: [string, string] | string[];
   lastMessage?: string;
-  lastMessageAt?: any;
+  lastMessageAt?: unknown;
   unreadBy?: Record<string, number | FieldValue>;
 };
 
 export type MessageDoc = {
   senderId: string;
   text: string;
-  createdAt: any;
+  createdAt: unknown;
   read: boolean;
 };
 
@@ -43,14 +43,19 @@ export async function sendMessage(args: {
   const otherId = args.participants[0] === args.senderId ? args.participants[1] : args.participants[0];
 
   const batch = writeBatch(args.db);
-  batch.set(convRef, {
-    participants: args.participants,
-    lastMessage: text,
-    lastMessageAt: serverTimestamp(),
-    unreadBy: {
-      [otherId]: increment(1),
-    },
-  } satisfies ConversationDoc, { merge: true });
+  // Shallow-merge must not replace the whole unreadBy map — use a dotted field path.
+  batch.set(
+    convRef,
+    {
+      participants: args.participants,
+      lastMessage: text,
+      lastMessageAt: serverTimestamp(),
+    } satisfies Partial<ConversationDoc>,
+    { merge: true },
+  );
+  batch.update(convRef, {
+    [`unreadBy.${otherId}`]: increment(1),
+  });
 
   batch.set(msgRef, {
     senderId: args.senderId,
@@ -72,11 +77,9 @@ export async function markConversationRead(args: {
   for (const id of args.messageIdsToMarkRead) {
     batch.update(doc(args.db, "conversations", args.conversationId, "messages", id), { read: true });
   }
-  batch.set(
-    doc(args.db, "conversations", args.conversationId),
-    { unreadBy: { [args.viewerId]: 0 } } satisfies Partial<ConversationDoc>,
-    { merge: true },
-  );
+  // Dot-path update preserves other participants' unread counts.
+  batch.update(doc(args.db, "conversations", args.conversationId), {
+    [`unreadBy.${args.viewerId}`]: 0,
+  });
   await batch.commit();
 }
-

@@ -82,12 +82,20 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
       userRef,
       (snap) => {
         const data = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
+        const legacyFirstName = typeof data?.firstName === "string" ? data.firstName.trim() : "";
+        const legacyLastName = typeof data?.lastName === "string" ? data.lastName.trim() : "";
         const v =
           data?.username && String(data.username).trim()
             ? String(data.username).toLowerCase()
             : null;
         setUsername(v);
         setNeedsNames(profileNeedsLegalName(data));
+        if (data?.hasLegalName !== true && legacyFirstName && legacyLastName) {
+          void saveUserLegalName(user.uid, {
+            firstName: legacyFirstName,
+            lastName: legacyLastName,
+          }).catch(() => {});
+        }
       },
       () => {
         setUsername(null);
