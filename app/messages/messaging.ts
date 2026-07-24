@@ -11,14 +11,14 @@ import {
 export type ConversationDoc = {
   participants: [string, string] | string[];
   lastMessage?: string;
-  lastMessageAt?: any;
+  lastMessageAt?: unknown;
   unreadBy?: Record<string, number | FieldValue>;
 };
 
 export type MessageDoc = {
   senderId: string;
   text: string;
-  createdAt: any;
+  createdAt: unknown;
   read: boolean;
 };
 
