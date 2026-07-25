@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { getAdminDb } from "@/lib/firebase-admin";
+import { getAdminAuth, getAdminDb } from "@/lib/firebase-admin";
 
 type FindSourceResponse = {
   transcript: string;
@@ -84,13 +84,14 @@ function coerceResponse(raw: any): FindSourceResponse {
   return { transcript, found, exact, recommendations };
 }
 
+function getBearerToken(req: Request): string | null {
+  const header = req.headers.get("authorization") || "";
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: "Missing GEMINI_API_KEY" }, { status: 500 });
-    }
-
     const body = (await req.json().catch(() => null)) as
       | { shortUrl?: unknown; clipId?: unknown }
       | null;
@@ -103,6 +104,39 @@ export async function POST(req: Request) {
     }
     if (!clipId) {
       return NextResponse.json({ error: "clipId is required" }, { status: 400 });
+    }
+
+    const token = getBearerToken(req);
+    if (!token) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+
+    const decoded = await getAdminAuth().verifyIdToken(token).catch(() => null);
+    if (!decoded?.uid) {
+      return NextResponse.json({ error: "Invalid authentication token" }, { status: 401 });
+    }
+
+    const adminDb = getAdminDb();
+    const clipRef = adminDb.collection("clips").doc(clipId);
+    const clipSnap = await clipRef.get();
+    if (!clipSnap.exists) {
+      return NextResponse.json({ error: "Clip not found" }, { status: 404 });
+    }
+
+    const clip = clipSnap.data() || {};
+    const ownerId =
+      typeof clip.userId === "string"
+        ? clip.userId
+        : typeof clip.curatorId === "string"
+          ? clip.curatorId
+          : "";
+    if (ownerId !== decoded.uid) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json({ error: "Missing GEMINI_API_KEY" }, { status: 500 });
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
@@ -138,9 +172,8 @@ export async function POST(req: Request) {
       }
     }
 
-    // Persist to Firestore using Admin SDK.
-    const adminDb = getAdminDb();
-    await adminDb.collection("clips").doc(clipId).set({ sourceData }, { merge: true });
+    // Persist to Firestore using Admin SDK (only after auth + ownership checks).
+    await clipRef.set({ sourceData }, { merge: true });
 
     return NextResponse.json(sourceData);
   } catch (e: any) {
@@ -148,4 +181,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-
