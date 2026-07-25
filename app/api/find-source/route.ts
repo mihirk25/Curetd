@@ -43,7 +43,7 @@ Return your response as JSON only in this format:
 `;
 }
 
-function extractJson(text: string): any {
+function extractJson(text: string): unknown {
   const t = String(text || "").trim();
   const noFences = t.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
   const first = noFences.indexOf("{");
@@ -52,32 +52,35 @@ function extractJson(text: string): any {
     throw new Error("Gemini did not return JSON");
   }
   const jsonText = noFences.slice(first, last + 1);
-  return JSON.parse(jsonText);
+  return JSON.parse(jsonText) as unknown;
 }
 
-function coerceResponse(raw: any): FindSourceResponse {
-  const transcript = typeof raw?.transcript === "string" ? raw.transcript : "";
-  const found = Boolean(raw?.found);
+function coerceResponse(raw: unknown): FindSourceResponse {
+  const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const transcript = typeof obj.transcript === "string" ? obj.transcript : "";
+  const found = Boolean(obj.found);
 
-  const exactRaw = raw?.exact;
+  const exactRaw = obj.exact;
+  const exactObj =
+    exactRaw && typeof exactRaw === "object" ? (exactRaw as Record<string, unknown>) : null;
   const exact =
-    exactRaw &&
-    typeof exactRaw === "object" &&
-    typeof exactRaw.url === "string" &&
-    typeof exactRaw.title === "string"
+    exactObj && typeof exactObj.url === "string" && typeof exactObj.title === "string"
       ? {
-          url: exactRaw.url,
-          title: exactRaw.title,
-          timestamp: Number(exactRaw.timestamp) || 0,
+          url: exactObj.url,
+          title: exactObj.title,
+          timestamp: Number(exactObj.timestamp) || 0,
         }
       : null;
 
-  const recsRaw = Array.isArray(raw?.recommendations) ? raw.recommendations : [];
+  const recsRaw = Array.isArray(obj.recommendations) ? obj.recommendations : [];
   const recommendations = recsRaw
-    .map((r: any) => ({
-      url: typeof r?.url === "string" ? r.url : "",
-      title: typeof r?.title === "string" ? r.title : "",
-    }))
+    .map((r) => {
+      const row = r && typeof r === "object" ? (r as Record<string, unknown>) : {};
+      return {
+        url: typeof row.url === "string" ? row.url : "",
+        title: typeof row.title === "string" ? row.title : "",
+      };
+    })
     .filter((r: { url: string; title: string }) => r.url && r.title)
     .slice(0, 5);
 
@@ -176,8 +179,9 @@ export async function POST(req: Request) {
     await clipRef.set({ sourceData }, { merge: true });
 
     return NextResponse.json(sourceData);
-  } catch (e: any) {
-    const message = e && typeof e === "object" && "message" in e ? String(e.message) : "Unknown error";
+  } catch (e: unknown) {
+    const message =
+      e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -1,45 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const require = createRequire(import.meta.url);
-
-function loadTsModule(relPath) {
-  const abs = path.join(root, relPath);
-  const source = readFileSync(abs, "utf8");
-  const { outputText } = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2020,
-      esModuleInterop: true,
-    },
-    fileName: abs,
-  });
-  const mod = { exports: {} };
-  const dirname = path.dirname(abs);
-  const localRequire = (id) => {
-    if (id.startsWith("@/")) {
-      return loadTsModule(id.slice(2));
-    }
-    if (id.startsWith(".")) {
-      const resolved = require.resolve(id, { paths: [dirname] });
-      if (resolved.endsWith(".ts") || resolved.endsWith(".tsx")) {
-        return loadTsModule(path.relative(root, resolved));
-      }
-      return require(resolved);
-    }
-    return require(id);
-  };
-  // eslint-disable-next-line no-new-func
-  const fn = new Function("exports", "require", "module", "__filename", "__dirname", outputText);
-  fn(mod.exports, localRequire, mod, abs, dirname);
-  return mod.exports;
-}
 
 function read(relPath) {
   return readFileSync(path.join(root, relPath), "utf8");
