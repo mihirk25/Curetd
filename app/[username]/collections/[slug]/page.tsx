@@ -10,6 +10,7 @@ import {
   getDocs,
   limit,
   query,
+  runTransaction,
   serverTimestamp,
   updateDoc,
   where,
@@ -147,18 +148,26 @@ export default function CollectionDetailPage() {
 
   const moveClip = async (index: number, dir: -1 | 1) => {
     if (!collectionData || !isOwner || reorderBusy) return;
-    const ids = [...(Array.isArray(collectionData.clipIds) ? collectionData.clipIds : [])];
-    const j = index + dir;
-    if (j < 0 || j >= ids.length) return;
-    [ids[index], ids[j]] = [ids[j], ids[index]];
+    const movingId = Array.isArray(collectionData.clipIds) ? collectionData.clipIds[index] : null;
+    if (!movingId) return;
     setReorderBusy(true);
     try {
-      await updateDoc(doc(db, "collections", collectionData.id), {
-        clipIds: ids,
-        updatedAt: serverTimestamp(),
+      const colRef = doc(db, "collections", collectionData.id);
+      const nextIds = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(colRef);
+        if (!snap.exists()) throw new Error("collection missing");
+        const ids = Array.isArray((snap.data() as { clipIds?: unknown }).clipIds)
+          ? [...((snap.data() as { clipIds: string[] }).clipIds)]
+          : [];
+        const i = ids.indexOf(movingId);
+        const j = i + dir;
+        if (i < 0 || j < 0 || j >= ids.length) return ids;
+        [ids[i], ids[j]] = [ids[j], ids[i]];
+        tx.update(colRef, { clipIds: ids, updatedAt: serverTimestamp() });
+        return ids;
       });
-      setCollectionData((prev) => (prev ? { ...prev, clipIds: ids } : prev));
-      await loadClipsForCollection({ ...collectionData, clipIds: ids });
+      setCollectionData((prev) => (prev ? { ...prev, clipIds: nextIds } : prev));
+      await loadClipsForCollection({ ...collectionData, clipIds: nextIds });
     } catch (e) {
       console.error(e);
       alert("Could not reorder.");

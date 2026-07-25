@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   addDoc,
   arrayUnion,
@@ -44,6 +44,7 @@ export function CollectionAddClipsModal({
   const [myClips, setMyClips] = useState<Array<{ id: string } & Record<string, unknown>>>([]);
   const [loadingClips, setLoadingClips] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const baselineIdsRef = useRef<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -72,7 +73,9 @@ export function CollectionAddClipsModal({
     if (!open || !targetCollection || !currentUser) return;
     setTab("yours");
     setSaveError(null);
-    setSelected(new Set(Array.isArray(targetCollection.clipIds) ? targetCollection.clipIds : []));
+    const baseline = Array.isArray(targetCollection.clipIds) ? [...targetCollection.clipIds] : [];
+    baselineIdsRef.current = baseline;
+    setSelected(new Set(baseline));
     resetNewClipForm();
     let cancelled = false;
     setLoadingClips(true);
@@ -117,14 +120,29 @@ export function CollectionAddClipsModal({
     setSaving(true);
     setSaveError(null);
     try {
-      const existing = Array.isArray(targetCollection.clipIds) ? [...targetCollection.clipIds] : [];
-      const keptInOrder = existing.filter((id) => selected.has(id));
-      const added: string[] = [];
-      for (const c of myClips) {
-        if (selected.has(c.id) && !existing.includes(c.id)) added.push(c.id);
+      const colRef = doc(db, "collections", targetCollection.id);
+      const freshSnap = await getDoc(colRef);
+      const existing =
+        freshSnap.exists() && Array.isArray((freshSnap.data() as { clipIds?: unknown }).clipIds)
+          ? [...((freshSnap.data() as { clipIds: string[] }).clipIds)]
+          : Array.isArray(targetCollection.clipIds)
+            ? [...targetCollection.clipIds]
+            : [];
+      const baseline = new Set(baselineIdsRef.current);
+      // Apply this modal's selection relative to the open-time baseline, but keep
+      // ids that appeared concurrently after the modal opened.
+      const nextIds: string[] = [];
+      for (const id of existing) {
+        if (!baseline.has(id)) {
+          nextIds.push(id); // concurrent add — preserve
+          continue;
+        }
+        if (selected.has(id)) nextIds.push(id); // still selected
       }
-      const nextIds = [...keptInOrder, ...added];
-      await updateDoc(doc(db, "collections", targetCollection.id), {
+      for (const c of myClips) {
+        if (selected.has(c.id) && !nextIds.includes(c.id)) nextIds.push(c.id);
+      }
+      await updateDoc(colRef, {
         clipIds: nextIds,
         updatedAt: serverTimestamp(),
       });

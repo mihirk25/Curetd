@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { db } from "../firebase";
-import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, serverTimestamp, query, orderBy, onSnapshot, setDoc, where, limit, arrayUnion, Timestamp, increment } from "firebase/firestore";
+import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, serverTimestamp, query, orderBy, onSnapshot, setDoc, where, limit, arrayUnion, Timestamp, increment, runTransaction } from "firebase/firestore";
 import { useAuth } from "./auth-context";
 import { UsernameSetup } from "./username-setup";
 import { CuratorSearchBar } from "./curator-search-bar";
@@ -1738,8 +1738,18 @@ export default function CuratdMVP() {
 
       if (inlineEdit && inlineEdit.clipId === clip.id) {
         const editingMomentId = inlineEdit.momentId;
-        const next = getMoments(clip).map((m: any) => (String(m?.id) === editingMomentId ? { ...m, ...moment } : m));
-        await updateDoc(doc(db, "clips", clip.id), { moments: next });
+        const clipRef = doc(db, "clips", clip.id);
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(clipRef);
+          if (!snap.exists()) throw new Error("clip missing");
+          const data = snap.data() as { userId?: string; moments?: unknown };
+          if (data.userId !== user.uid) throw new Error("not owner");
+          const current = Array.isArray(data.moments) ? data.moments : [];
+          const next = current.map((m: any) =>
+            String(m?.id) === editingMomentId ? { ...m, ...moment } : m,
+          );
+          tx.update(clipRef, { moments: next });
+        });
       } else {
         await updateDoc(doc(db, "clips", clip.id), { moments: arrayUnion(moment) });
       }
@@ -1756,9 +1766,17 @@ export default function CuratdMVP() {
 
   const deleteMoment = async (clip: any, momentId: string) => {
     if (!user || user.uid !== clip.userId) return;
-    const next = getMoments(clip).filter((m: any) => String(m?.id) !== momentId);
     try {
-      await updateDoc(doc(db, "clips", clip.id), { moments: next });
+      const clipRef = doc(db, "clips", clip.id);
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(clipRef);
+        if (!snap.exists()) throw new Error("clip missing");
+        const data = snap.data() as { userId?: string; moments?: unknown };
+        if (data.userId !== user.uid) throw new Error("not owner");
+        const current = Array.isArray(data.moments) ? data.moments : [];
+        const next = current.filter((m: any) => String(m?.id) !== momentId);
+        tx.update(clipRef, { moments: next });
+      });
       if (playingMoment?.clipId === clip.id && playingMoment?.momentId === momentId) {
         setPlayingMoment(null);
       }
