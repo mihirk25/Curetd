@@ -96,6 +96,9 @@
     };
   }
 
+  /** @type {Promise<object|null>|null} */
+  let refreshInFlight = null;
+
   async function getValidSession() {
     if (typeof CuratdAuth === "undefined") {
       throw new Error("CuratdAuth is not loaded.");
@@ -103,12 +106,38 @@
     let session = await CuratdAuth.getStoredSession();
     if (!session?.idToken) return null;
     if (session.expiresAt > Date.now() + 60_000) return session;
-    if (!session.refreshToken) return null;
+
+    const stillValid = Number(session.expiresAt) > Date.now();
+    if (!session.refreshToken) {
+      return stillValid ? session : null;
+    }
+
     try {
-      session = await refreshSession(session);
-      await CuratdAuth.saveSession(session);
-      return session;
+      if (!refreshInFlight) {
+        const baseSession = session;
+        refreshInFlight = (async () => {
+          try {
+            const current = await CuratdAuth.getStoredSession();
+            if (current?.idToken && current.expiresAt > Date.now() + 60_000) {
+              return current;
+            }
+            const toRefresh =
+              current?.refreshToken || current?.idToken ? current : baseSession;
+            const refreshed = await refreshSession(toRefresh);
+            await CuratdAuth.saveSession(refreshed);
+            return refreshed;
+          } finally {
+            refreshInFlight = null;
+          }
+        })();
+      }
+      return await refreshInFlight;
     } catch {
+      // Prefer a session another concurrent refresh may have just saved.
+      const latest = await CuratdAuth.getStoredSession();
+      if (latest?.idToken && Number(latest.expiresAt) > Date.now()) return latest;
+      // Keep using the still-valid Bearer token instead of forcing sign-out.
+      if (stillValid) return session;
       return null;
     }
   }

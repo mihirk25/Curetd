@@ -115,25 +115,39 @@ export function subscribeToMessages(
   callback: (messages: Array<{ id: string } & Record<string, any>>) => void,
 ) {
   let unsub: (() => void) | null = null;
+  let cancelled = false;
 
   void (async () => {
     const { collection: fsCollection, onSnapshot, orderBy, query } = await import("firebase/firestore");
+    // Cleanup may run before the dynamic import finishes; never attach a leaked listener.
+    if (cancelled) return;
     const q = query(
       fsCollection(db, "conversations", conversationId, "messages"),
       orderBy("createdAt", "asc"),
     );
     unsub = onSnapshot(q, (snap) => {
+      if (cancelled) return;
       const msgs = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
       callback(msgs);
     });
+    if (cancelled) {
+      try {
+        unsub?.();
+      } catch {
+        // ignore
+      }
+      unsub = null;
+    }
   })();
 
   return () => {
+    cancelled = true;
     try {
       unsub?.();
     } catch {
       // ignore
     }
+    unsub = null;
   };
 }
 
