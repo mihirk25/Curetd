@@ -17,7 +17,12 @@
       if (Number.isInteger(val)) return { integerValue: String(val) };
       return { doubleValue: val };
     }
-    if (val instanceof Date) return { timestampValue: val.toISOString() };
+    if (val instanceof Date) {
+      if (Number.isNaN(val.getTime())) {
+        throw new Error("Unsupported Firestore value type: Invalid Date");
+      }
+      return { timestampValue: val.toISOString() };
+    }
     if (Array.isArray(val)) {
       return { arrayValue: { values: val.map((v) => encodeValue(v)) } };
     }
@@ -38,7 +43,12 @@
     if ("booleanValue" in v) return v.booleanValue;
     if ("integerValue" in v) return Number(v.integerValue);
     if ("doubleValue" in v) return v.doubleValue;
-    if ("timestampValue" in v) return v.timestampValue;
+    // Keep timestamps as Date so encodeValue round-trips them as timestampValue
+    // (not stringValue) when rewriting moments on merge saves.
+    if ("timestampValue" in v) {
+      const d = new Date(v.timestampValue);
+      return Number.isNaN(d.getTime()) ? v.timestampValue : d;
+    }
     if ("arrayValue" in v) {
       const values = v.arrayValue?.values || [];
       return values.map(decodeValue);
@@ -281,7 +291,8 @@
       endTime,
       note: "",
       topic: "General",
-      addedAt: new Date().toISOString(),
+      // Date → Firestore timestampValue (ISO strings become stringValue and break feed order)
+      addedAt: new Date(),
     };
 
     const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
@@ -323,7 +334,8 @@
       username,
       displayName,
       audioOnly: false,
-      createdAt: new Date().toISOString(),
+      // Date → Firestore timestampValue (matches web serverTimestamp / Timestamp.now())
+      createdAt: new Date(),
       source: "extension",
       moments: [moment],
     });

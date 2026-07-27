@@ -45,6 +45,14 @@
         { "fieldPath": "username", "order": "ASCENDING" },
         { "fieldPath": "slug", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "collections",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "slug", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

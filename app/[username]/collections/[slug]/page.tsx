@@ -85,13 +85,37 @@ export default function CollectionDetailPage() {
         return;
       }
       try {
-        const q = query(
-          collection(db, "collections"),
-          where("username", "==", username),
-          where("slug", "==", slug),
-          limit(1),
-        );
-        const snap = await getDocs(q);
+        // Resolve handle → uid so collections stay reachable after username changes
+        // (collection docs denormalize username and are not rewritten on rename).
+        const handleSnap = await getDoc(doc(db, "usernames", username));
+        const ownerUid =
+          handleSnap.exists() && typeof (handleSnap.data() as { uid?: unknown })?.uid === "string"
+            ? String((handleSnap.data() as { uid: string }).uid)
+            : "";
+
+        let snap =
+          ownerUid
+            ? await getDocs(
+                query(
+                  collection(db, "collections"),
+                  where("userId", "==", ownerUid),
+                  where("slug", "==", slug),
+                  limit(1),
+                ),
+              )
+            : null;
+
+        // Fallback for legacy links keyed only by denormalized username.
+        if (!snap || snap.empty) {
+          snap = await getDocs(
+            query(
+              collection(db, "collections"),
+              where("username", "==", username),
+              where("slug", "==", slug),
+              limit(1),
+            ),
+          );
+        }
         if (cancelled) return;
         if (snap.empty) {
           setNotFound(true);
