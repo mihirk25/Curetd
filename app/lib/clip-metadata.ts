@@ -2,6 +2,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/firebase";
 import { getAdminDb, isAdminConfigured } from "@/lib/firebase-admin";
 import { extractVideoId } from "./clip-playback";
+import { normalizeCuratorUsername } from "./curator-username";
 
 export type ClipForMetadata = {
   id: string;
@@ -15,10 +16,6 @@ export type ClipForMetadata = {
   moments?: Array<{ note?: string }>;
 };
 
-function normalizeUsername(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null;
-}
-
 function primaryNote(clip: ClipForMetadata) {
   const moments = Array.isArray(clip.moments) ? clip.moments : [];
   if (moments.length > 0) {
@@ -29,19 +26,22 @@ function primaryNote(clip: ClipForMetadata) {
   return null;
 }
 
+/**
+ * Prefer live users/{userId}.username. Denormalized clip.username goes stale after rename
+ * and can point at a reclaimed handle.
+ */
 async function resolveUsername(
   data: Record<string, unknown>,
   fetchUser: (userId: string) => Promise<string | null>,
 ): Promise<string | null> {
-  let username = normalizeUsername(data.username);
-  if (username || typeof data.userId !== "string" || !data.userId) {
-    return username;
+  if (typeof data.userId === "string" && data.userId) {
+    try {
+      return await fetchUser(data.userId);
+    } catch {
+      // Fall through to denormalized on transient read failures.
+    }
   }
-  try {
-    return await fetchUser(data.userId);
-  } catch {
-    return null;
-  }
+  return normalizeCuratorUsername(data.username);
 }
 
 async function fetchClipViaAdmin(id: string): Promise<ClipForMetadata | null> {
@@ -52,7 +52,7 @@ async function fetchClipViaAdmin(id: string): Promise<ClipForMetadata | null> {
   const data = snap.data() || {};
   const username = await resolveUsername(data, async (userId) => {
     const userSnap = await adminDb.collection("users").doc(userId).get();
-    return userSnap.exists ? normalizeUsername(userSnap.data()?.username) : null;
+    return userSnap.exists ? normalizeCuratorUsername(userSnap.data()?.username) : null;
   });
 
   return { id: snap.id, ...data, username } as ClipForMetadata;
@@ -66,7 +66,7 @@ async function fetchClipViaClientSdk(id: string): Promise<ClipForMetadata | null
   const data = snap.data() || {};
   const username = await resolveUsername(data, async (userId) => {
     const userSnap = await getDoc(doc(db, "users", userId));
-    return userSnap.exists() ? normalizeUsername(userSnap.data()?.username) : null;
+    return userSnap.exists() ? normalizeCuratorUsername(userSnap.data()?.username) : null;
   });
 
   return { id: snap.id, ...data, username } as ClipForMetadata;
