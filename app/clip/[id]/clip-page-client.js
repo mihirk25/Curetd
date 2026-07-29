@@ -10,6 +10,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../../firebase";
 import { SharedClipPlayer } from "./shared-clip-player";
 import { ShareActionsRow } from "./share-actions-row";
+import { normalizeCuratorUsername } from "../../lib/curator-username";
 
 function extractVideoId(url) {
   if (!url) return null;
@@ -24,10 +25,6 @@ function extractVideoId(url) {
     if (m) return m[1];
   }
   return null;
-}
-
-function normalizeUsername(value) {
-  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null;
 }
 
 function getPrimaryMoment(clip) {
@@ -59,19 +56,19 @@ async function fetchClipWithCurator(id) {
 
   const data = snap.data() || {};
   const clip = { id: snap.id, ...data };
-  let username = normalizeUsername(clip.username);
-  if (username || !clip.userId) {
-    return { ...clip, username };
+  // Prefer live profile username — denormalized clip.username goes stale after rename.
+  if (typeof clip.userId === "string" && clip.userId) {
+    try {
+      const userSnap = await getDoc(doc(db, "users", clip.userId));
+      const userData = userSnap.exists() ? userSnap.data() : null;
+      const live = normalizeCuratorUsername(userData == null ? null : userData.username);
+      if (live) return { ...clip, username: live };
+      return { ...clip, username: null };
+    } catch {
+      // Fall back to denormalized on transient failures.
+    }
   }
-
-  try {
-    const userSnap = await getDoc(doc(db, "users", clip.userId));
-    const userData = userSnap.exists() ? userSnap.data() : null;
-    username = normalizeUsername(userData == null ? null : userData.username);
-  } catch {
-    username = null;
-  }
-  return { ...clip, username };
+  return { ...clip, username: normalizeCuratorUsername(clip.username) };
 }
 
 function formatTimestamp(totalSeconds) {

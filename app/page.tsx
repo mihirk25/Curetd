@@ -22,6 +22,7 @@ import {
 } from "./lib/firestore";
 import { markUserHasAddedClip, shouldPromptExtensionInstall } from "../src/lib/firestore";
 import { supportsChromeExtensionBrowser } from "./lib/browser";
+import { resolveCuratorHandle } from "./lib/curator-username";
 import {
   adjustTopicUsage,
   ensureSeedTopics,
@@ -2917,15 +2918,7 @@ export default function CuratdMVP() {
                             <span className="text-xs text-zinc-500">
                               Curated by{" "}
                             {(() => {
-                              const handleFromClip =
-                                typeof clip.username === "string" && clip.username.trim()
-                                  ? clip.username.trim().toLowerCase()
-                                  : null;
-                              const handleFromLookup =
-                                !handleFromClip && typeof clip.userId === "string"
-                                  ? curatorByUid[clip.userId]?.username ?? null
-                                  : null;
-                              const handle = handleFromClip || handleFromLookup;
+                              const handle = resolveCuratorHandle(clip, curatorByUid);
                               if (handle) {
                                 const canFollow =
                                   typeof clip.userId === "string" &&
@@ -2971,24 +2964,13 @@ export default function CuratdMVP() {
                           </div>
                           <FeedClipCuratorAvatar
                             userId={typeof clip.userId === "string" ? clip.userId : null}
-                            handle={
-                              typeof clip.username === "string" && clip.username.trim()
-                                ? clip.username.trim().toLowerCase()
-                                : typeof clip.userId === "string"
-                                  ? curatorByUid[clip.userId]?.username ?? null
-                                  : null
-                            }
+                            handle={resolveCuratorHandle(clip, curatorByUid)}
                             clipPhotoURL={typeof clip.photoURL === "string" ? clip.photoURL : null}
                             curatorProfile={
                               typeof clip.userId === "string" ? curatorByUid[clip.userId] : undefined
                             }
                             onGoProfile={() => {
-                              const h =
-                                typeof clip.username === "string" && clip.username.trim()
-                                  ? clip.username.trim().toLowerCase()
-                                  : typeof clip.userId === "string"
-                                    ? curatorByUid[clip.userId]?.username ?? null
-                                    : null;
+                              const h = resolveCuratorHandle(clip, curatorByUid);
                               if (h) goToCuratorProfile(h);
                             }}
                           />

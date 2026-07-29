@@ -5,6 +5,8 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   collection,
+  doc,
+  getDoc,
   getDocs,
   limit,
   onSnapshot,
@@ -28,6 +30,7 @@ import {
 import { ClipYoutubeModal } from "../components/clip-youtube-modal";
 import { subscribeToTopics, type TopicRecord } from "../lib/topic-directory";
 import { CURATD_TOPICS } from "../lib/topics";
+import { resolveCuratorHandle } from "../lib/curator-username";
 
 const EXPLORE_TOPICS = [
   "Philosophy",
@@ -95,6 +98,9 @@ export default function ExplorePage() {
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
   const [clips, setClips] = useState<Array<{ id: string } & Record<string, unknown>>>([]);
   const [clipsLoading, setClipsLoading] = useState(true);
+  const [curatorUsernameByUid, setCuratorUsernameByUid] = useState<Record<string, string | null>>(
+    {},
+  );
   const [followingByUid, setFollowingByUid] = useState<Record<string, boolean>>({});
   const [followBusyByUid, setFollowBusyByUid] = useState<Record<string, boolean>>({});
   const [selectedClip, setSelectedClip] = useState<Record<string, unknown> | null>(null);
@@ -285,6 +291,37 @@ export default function ExplorePage() {
           rows = rows.filter((c) => clipMatchesTopic(c, selectedTopic)).slice(0, 20);
         }
         setClips(rows);
+        const uids = [
+          ...new Set(
+            rows
+              .map((c) => c.userId)
+              .filter((uid): uid is string => typeof uid === "string" && uid.length > 0),
+          ),
+        ];
+        if (uids.length > 0) {
+          const entries = await Promise.all(
+            uids.map(async (uid) => {
+              try {
+                const snap = await getDoc(doc(db, "users", uid));
+                const data = snap.exists() ? (snap.data() as { username?: unknown }) : null;
+                const username =
+                  typeof data?.username === "string" && data.username.trim()
+                    ? data.username.trim().toLowerCase()
+                    : null;
+                return [uid, username] as const;
+              } catch {
+                return [uid, null] as const;
+              }
+            }),
+          );
+          if (!cancelled) {
+            setCuratorUsernameByUid((prev) => {
+              const next = { ...prev };
+              for (const [uid, username] of entries) next[uid] = username;
+              return next;
+            });
+          }
+        }
       } catch (e) {
         console.error(e);
         if (!cancelled) setClips([]);
@@ -614,6 +651,7 @@ export default function ExplorePage() {
                   <ExploreClipCard
                     key={clip.id}
                     clip={clip}
+                    curatorUsernameByUid={curatorUsernameByUid}
                     onPlay={() => setSelectedClip(clip)}
                     onCuratorClick={(handle) => router.push(`/${handle}`)}
                   />
@@ -637,10 +675,12 @@ export default function ExplorePage() {
 
 function ExploreClipCard({
   clip,
+  curatorUsernameByUid,
   onPlay,
   onCuratorClick,
 }: {
   clip: { id: string } & Record<string, unknown>;
+  curatorUsernameByUid: Record<string, string | null>;
   onPlay: () => void;
   onCuratorClick: (username: string) => void;
 }) {
@@ -658,10 +698,7 @@ function ExploreClipCard({
     : vid
       ? formatTimestamp(startSec)
       : "";
-  const handle =
-    typeof clip.username === "string" && clip.username.trim()
-      ? clip.username.trim().toLowerCase()
-      : null;
+  const handle = resolveCuratorHandle(clip, curatorUsernameByUid);
   const topic =
     (typeof primary?.topic === "string" && primary.topic) ||
     (typeof clip.topic === "string" ? clip.topic : "");

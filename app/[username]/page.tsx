@@ -37,6 +37,7 @@ import {
   isFollowing,
   unfollowUser,
 } from "../lib/firestore";
+import { normalizeCuratorUsername } from "../lib/curator-username";
 import {
   extractVideoId,
   formatTimestamp,
@@ -196,14 +197,32 @@ export default function PublicProfilePage() {
           try {
             const clipSnap = await getDoc(doc(db, "clips", originalClipId));
             if (!clipSnap.exists()) continue;
+            const clipData = clipSnap.data() as Record<string, unknown>;
+            const originalUid =
+              (typeof data?.originalCuratorId === "string" && data.originalCuratorId) ||
+              (typeof clipData.userId === "string" ? clipData.userId : "");
+            let liveUsername = normalizeCuratorUsername(clipData.username);
+            if (originalUid) {
+              try {
+                const curatorSnap = await getDoc(doc(db, "users", originalUid));
+                if (curatorSnap.exists()) {
+                  liveUsername = normalizeCuratorUsername(
+                    (curatorSnap.data() as { username?: unknown })?.username,
+                  );
+                }
+              } catch {
+                // keep denormalized fallback
+              }
+            }
             reposted.push({
               id: clipSnap.id,
-              ...clipSnap.data(),
+              ...clipData,
+              username: liveUsername,
               __repost: true,
               __repostDocId: d.id,
               __repostedAt: data?.repostedAt ?? null,
               __repostedByUsername: username,
-              __originalCuratorId: String(data?.originalCuratorId || ""),
+              __originalCuratorId: originalUid,
             });
           } catch {}
         }

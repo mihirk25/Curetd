@@ -9,8 +9,37 @@ import {
   serverTimestamp,
   setDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../../firebase";
+
+const DENORMALIZED_USERNAME_BATCH = 400;
+
+/** Rewrite denormalized `username` on docs owned by uid (clips, collections). */
+async function rewriteOwnedDenormalizedUsernames(uid: string, username: string) {
+  const collectionsToRewrite = ["clips", "collections"] as const;
+  for (const collectionId of collectionsToRewrite) {
+    const snap = await getDocs(query(collection(db, collectionId), where("userId", "==", uid)));
+    let batch = writeBatch(db);
+    let ops = 0;
+    for (const d of snap.docs) {
+      const current = (d.data() as { username?: unknown }).username;
+      if (typeof current === "string" && current.trim().toLowerCase() === username) {
+        continue;
+      }
+      batch.update(d.ref, { username });
+      ops += 1;
+      if (ops >= DENORMALIZED_USERNAME_BATCH) {
+        await batch.commit();
+        batch = writeBatch(db);
+        ops = 0;
+      }
+    }
+    if (ops > 0) {
+      await batch.commit();
+    }
+  }
+}
 
 export const USERNAME_TAKEN = "USERNAME_TAKEN";
 
@@ -250,6 +279,14 @@ export async function changeUsername(uid: string, raw: string) {
 
       tx.update(userRef, { username: normalized });
     });
+    // Clips/collections store a denormalized username for feed cards and share links.
+    // Without a rewrite, pre-rename docs keep the old handle (404 after rename, or
+    // misattribution if someone else claims it). Best-effort: handle move already committed.
+    try {
+      await rewriteOwnedDenormalizedUsernames(uid, normalized);
+    } catch (rewriteError) {
+      console.error("changeUsername denormalized rewrite failed:", rewriteError);
+    }
   } catch (error) {
     console.error("changeUsername transaction failed:", error);
     throw error;
