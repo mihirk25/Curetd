@@ -18,7 +18,7 @@ type LiveUsernameEntry =
  * Denormalized username is only used when no live lookup result is available yet.
  */
 export function resolveCuratorHandle(
-  entity: { username?: unknown; userId?: unknown },
+  entity: { username?: unknown; userId?: unknown } | Record<string, unknown>,
   liveByUid?: Record<string, LiveUsernameEntry> | null,
 ): string | null {
   const uid = typeof entity.userId === "string" && entity.userId ? entity.userId : null;
