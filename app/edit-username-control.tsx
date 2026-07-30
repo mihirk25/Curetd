@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "./auth-context";
-import { changeUsername, USERNAME_TAKEN, validateUsernameFormat } from "../src/lib/firestore";
+import { changeUsername, USERNAME_RESERVED, USERNAME_TAKEN, validateUsernameFormat } from "../src/lib/firestore";
 
 type EditUsernameControlProps = {
   open: boolean;
@@ -40,7 +40,12 @@ export function EditUsernameModal({ open, onOpenChange, currentUsername }: EditU
     try {
       ({ username: normalized } = validateUsernameFormat(input));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Invalid username.");
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === USERNAME_RESERVED) {
+        setError("That username is reserved. Please choose another.");
+      } else {
+        setError(msg || "Invalid username.");
+      }
       return;
     }
     if (currentUsername && normalized === currentUsername) {
@@ -71,6 +76,8 @@ export function EditUsernameModal({ open, onOpenChange, currentUsername }: EditU
       const msgLower = msg.toLowerCase();
       if (msg === USERNAME_TAKEN) {
         setError("That username is taken.");
+      } else if (msg === USERNAME_RESERVED) {
+        setError("That username is reserved. Please choose another.");
       } else if (code === "permission-denied") {
         setError("Permission denied — check Firestore rules");
       } else if (code === "already-exists" || msgLower.includes("already exists")) {

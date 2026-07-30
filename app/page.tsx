@@ -1741,7 +1741,15 @@ export default function CuratdMVP() {
         const next = getMoments(clip).map((m: any) => (String(m?.id) === editingMomentId ? { ...m, ...moment } : m));
         await updateDoc(doc(db, "clips", clip.id), { moments: next });
       } else {
-        await updateDoc(doc(db, "clips", clip.id), { moments: arrayUnion(moment) });
+        // Legacy Curate/DM clips store the range only on top-level fields (no moments[]).
+        // arrayUnion alone would create moments=[new] and hide the original range forever.
+        const existingMoments = Array.isArray(clip?.moments) ? clip.moments : [];
+        if (existingMoments.length === 0) {
+          const legacy = getMoments(clip)[0];
+          await updateDoc(doc(db, "clips", clip.id), { moments: [legacy, moment] });
+        } else {
+          await updateDoc(doc(db, "clips", clip.id), { moments: arrayUnion(moment) });
+        }
       }
 
       setInlineAddForClipId(null);

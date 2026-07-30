@@ -9,6 +9,9 @@ import {
   profileNeedsLegalName,
   registerInitialUsername,
   saveUserLegalName,
+  USERNAME_RESERVED,
+  USERNAME_TAKEN,
+  isReservedUsername,
 } from "../src/lib/firestore";
 
 const UsernameStateContext = createContext<{
@@ -26,7 +29,7 @@ export function useRefreshUsername() {
 
 function validateUsername(raw: string) {
   const username = raw.trim().toLowerCase();
-  const ok = /^[a-z0-9_]{3,20}$/.test(username);
+  const ok = /^[a-z0-9_]{3,20}$/.test(username) && !isReservedUsername(username);
   return { username, ok };
 }
 
@@ -177,7 +180,11 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
     if (!user) return;
     const { username: normalized, ok } = validateUsername(input);
     if (!ok) {
-      setError("Username must be 3–20 chars, lowercase, and only a-z, 0-9, or _.");
+      if (isReservedUsername(normalized)) {
+        setError("That username is reserved. Please choose another.");
+      } else {
+        setError("Username must be 3–20 chars, lowercase, and only a-z, 0-9, or _.");
+      }
       return;
     }
 
@@ -191,8 +198,10 @@ export function UsernameSetup({ children }: { children?: React.ReactNode }) {
       setOpen(false);
     } catch (err: unknown) {
       const code = err && typeof err === "object" && "message" in err ? String((err as { message: string }).message) : "";
-      if (code === "USERNAME_TAKEN") {
+      if (code === USERNAME_TAKEN || code === "USERNAME_TAKEN") {
         setError("That username is taken.");
+      } else if (code === USERNAME_RESERVED) {
+        setError("That username is reserved. Please choose another.");
       } else if (code === "ALREADY_HAS_USERNAME") {
         setError("You already have a username on this account.");
       } else {
