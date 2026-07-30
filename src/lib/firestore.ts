@@ -13,8 +13,28 @@ import {
 import { db } from "../../firebase";
 
 export const USERNAME_TAKEN = "USERNAME_TAKEN";
+export const USERNAME_RESERVED = "USERNAME_RESERVED";
 
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
+
+/** Handles that collide with App Router static routes (static wins over `[username]`). */
+export const RESERVED_USERNAMES = new Set([
+  "settings",
+  "messages",
+  "explore",
+  "discover",
+  "privacy",
+  "clip",
+  "api",
+  "login",
+  "signin",
+  "signout",
+  "signup",
+]);
+
+export function isReservedUsername(username: string): boolean {
+  return RESERVED_USERNAMES.has(String(username).trim().toLowerCase());
+}
 
 export function profileNeedsLegalName(data: {
   firstName?: unknown;
@@ -71,6 +91,9 @@ export function validateUsernameFormat(raw: string): { username: string; ok: tru
   if (!USERNAME_RE.test(username)) {
     throw new Error("Username must be 3–20 characters, lowercase, and only a-z, 0-9, or _.");
   }
+  if (isReservedUsername(username)) {
+    throw new Error(USERNAME_RESERVED);
+  }
   return { username, ok: true as const };
 }
 
@@ -120,6 +143,11 @@ export async function ensureGoogleUserHasUsername(params: {
       attempt === 0 ? null : String(Math.floor(1000 + Math.random() * 9000));
     const candidate = buildEmailBasedCandidate(email, suffix);
     if (!USERNAME_RE.test(candidate)) continue;
+    // Force a suffix when the email local-part collides with a reserved route.
+    if (isReservedUsername(candidate)) {
+      if (attempt >= 4) return null;
+      continue;
+    }
     try {
       await runTransaction(db, async (tx) => {
         const uSnap = await tx.get(userRef);
