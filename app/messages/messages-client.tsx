@@ -14,6 +14,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  Timestamp,
   updateDoc,
   where,
 } from "firebase/firestore";
@@ -25,6 +26,18 @@ import { getConversationId, markConversationRead, sendMessage, type Conversation
 import { sendMessage as sendMessageViaFirestoreUtil, subscribeToMessages } from "../lib/firestore";
 import { NewMessageModal } from "../components/NewMessageModal";
 import { Navbar } from "../components/Navbar";
+import { useUsername } from "../username-setup";
+
+function newMomentId() {
+  try {
+    return (
+      (globalThis.crypto?.randomUUID?.() as string | undefined) ||
+      `${Date.now()}_${Math.random().toString(16).slice(2)}`
+    );
+  } catch {
+    return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+}
 
 const YOUTUBE_URL_RE = /(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
 
@@ -340,6 +353,7 @@ function ClipFromLinkModal(props: {
 
 export function MessagesClient() {
   const { user } = useAuth();
+  const username = useUsername();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -1252,16 +1266,39 @@ export function MessagesClient() {
                                                 if (o.author_name && o.author_name.trim()) resolvedChannel = o.author_name;
                                               }
                                             }
+                                            const startTime = Math.floor(Number(clip?.startTime || 0));
+                                            const endTime = Math.max(
+                                              startTime + 1,
+                                              Math.floor(Number(clip?.endTime || 0)),
+                                            );
+                                            const topic =
+                                              typeof clip?.topic === "string" && clip.topic.trim()
+                                                ? clip.topic.trim()
+                                                : "General";
+                                            const moment = {
+                                              id: newMomentId(),
+                                              startTime,
+                                              endTime,
+                                              note: "",
+                                              topic,
+                                              addedAt: Timestamp.now(),
+                                            };
                                             await addDoc(collection(db, "clips"), {
                                               userId: user.uid,
                                               videoId: vid,
-                                              startTime: Math.floor(Number(clip?.startTime || 0)),
-                                              endTime: Math.floor(Number(clip?.endTime || 0)),
-                                              topic: typeof clip?.topic === "string" ? clip.topic : "",
+                                              videoUrl: `https://www.youtube.com/watch?v=${vid}`,
+                                              startTime,
+                                              endTime,
+                                              topic,
                                               channel: resolvedChannel,
+                                              channelName: resolvedChannel,
                                               title: resolvedTitle,
+                                              audioOnly: false,
+                                              username: username ?? null,
+                                              displayName: username || "Anonymous",
                                               createdAt: serverTimestamp(),
                                               note: "",
+                                              moments: [moment],
                                             });
                                             setClipCuratedToastByMessageId((prev) => ({ ...prev, [m.id]: true }));
                                             window.setTimeout(
