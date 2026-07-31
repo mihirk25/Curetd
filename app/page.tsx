@@ -37,6 +37,7 @@ import {
   youtubeThumbnailImgProps,
   youtubeThumbnailUrl,
 } from "./lib/clip-playback";
+import { resolveAuthorHandle } from "./lib/author-username";
 
 declare global {
   interface Window {
@@ -1164,6 +1165,17 @@ export default function CuratdMVP() {
         if (curatorByUid[uid] !== undefined) continue;
         missing.add(uid);
       }
+      // Comment cards also denormalize username; resolve live handles so a rename
+      // (and especially a reclaimed old handle) cannot misattribute authorship.
+      for (const list of Object.values(commentsByClipId)) {
+        if (!Array.isArray(list)) continue;
+        for (const comment of list) {
+          const uid = comment?.userId;
+          if (typeof uid !== "string" || !uid) continue;
+          if (curatorByUid[uid] !== undefined) continue;
+          missing.add(uid);
+        }
+      }
       if (missing.size === 0) return;
 
       const entries = await Promise.all(
@@ -1198,7 +1210,7 @@ export default function CuratdMVP() {
     return () => {
       cancelled = true;
     };
-  }, [clips, curatorByUid]);
+  }, [clips, commentsByClipId, curatorByUid]);
 
   useEffect(() => {
     setPlayingMoment(null);
@@ -3088,10 +3100,8 @@ export default function CuratdMVP() {
                                     {(commentsByClipId[String(clip.id)] ?? []).map((c: any) => {
                                       const canDelete =
                                         !!user?.uid && (user.uid === clip.userId || user.uid === c?.userId);
-                                      const handle =
-                                        typeof c?.username === "string" && c.username.trim()
-                                          ? c.username.trim().toLowerCase()
-                                          : null;
+                                      const handle = resolveAuthorHandle(c, curatorByUid);
+                                      const avatarLetter = (handle || "U").slice(0, 1).toUpperCase();
                                       return (
                                         <div
                                           key={String(c?.id || "")}
@@ -3107,7 +3117,7 @@ export default function CuratdMVP() {
                                             />
                                           ) : (
                                             <div className="h-8 w-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[11px] font-bold text-zinc-200 shrink-0">
-                                              {String(c?.username || "U").slice(0, 1).toUpperCase()}
+                                              {avatarLetter}
                                             </div>
                                           )}
 

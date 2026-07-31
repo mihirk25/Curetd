@@ -1,5 +1,6 @@
 import {
   collection,
+  collectionGroup,
   doc,
   getDoc,
   getDocs,
@@ -9,8 +10,41 @@ import {
   serverTimestamp,
   setDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../../firebase";
+
+const COMMENT_USERNAME_BATCH = 400;
+
+/**
+ * Comments store a denormalized `username` for feed cards. After a rename those
+ * docs keep the old handle until rewritten; if someone else claims it, UI that
+ * trusts the field misattributes authorship. Best-effort collection-group update.
+ */
+async function rewriteOwnedCommentUsernames(uid: string, username: string) {
+  const snap = await getDocs(query(collectionGroup(db, "comments"), where("userId", "==", uid)));
+  let batch = writeBatch(db);
+  let ops = 0;
+  for (const d of snap.docs) {
+    const data = d.data() as { username?: unknown; displayName?: unknown };
+    const current = typeof data.username === "string" ? data.username.trim().toLowerCase() : "";
+    const currentDisplay =
+      typeof data.displayName === "string" ? data.displayName.trim().toLowerCase() : "";
+    if (current === username && currentDisplay === username) {
+      continue;
+    }
+    batch.update(d.ref, { username, displayName: username });
+    ops += 1;
+    if (ops >= COMMENT_USERNAME_BATCH) {
+      await batch.commit();
+      batch = writeBatch(db);
+      ops = 0;
+    }
+  }
+  if (ops > 0) {
+    await batch.commit();
+  }
+}
 
 export const USERNAME_TAKEN = "USERNAME_TAKEN";
 
@@ -250,6 +284,13 @@ export async function changeUsername(uid: string, raw: string) {
 
       tx.update(userRef, { username: normalized });
     });
+    // Comments keep a denormalized username; rewrite so @links don't 404 or
+    // hijack to a reclaimed handle. Best-effort after the handle move commits.
+    try {
+      await rewriteOwnedCommentUsernames(uid, normalized);
+    } catch (rewriteError) {
+      console.error("changeUsername comment username rewrite failed:", rewriteError);
+    }
   } catch (error) {
     console.error("changeUsername transaction failed:", error);
     throw error;
