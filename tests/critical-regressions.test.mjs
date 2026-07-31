@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
-import { createRequire } from "node:module";
-import { register } from "node:module";
-import { pathToFileURL } from "node:url";
 
-// Load the TS helper via a lightweight transpile-free dynamic import of the
-// compiled logic — mirror the source with a tiny eval of the exported functions
-// by reading and asserting against source, plus a local copy of the pure helpers.
+// Pure helper logic mirrored from app/lib/author-username.ts for unit coverage
+// without a TS loader; source-shape assertions lock the wired call sites.
 
 function normalizeAuthorUsername(value) {
   return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null;
