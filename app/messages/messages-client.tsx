@@ -1255,6 +1255,9 @@ export function MessagesClient() {
                                             await addDoc(collection(db, "clips"), {
                                               userId: user.uid,
                                               videoId: vid,
+                                              // Required so later video-mode merges find this clip
+                                              // (where audioOnly == false does not match missing fields).
+                                              audioOnly: false,
                                               startTime: Math.floor(Number(clip?.startTime || 0)),
                                               endTime: Math.floor(Number(clip?.endTime || 0)),
                                               topic: typeof clip?.topic === "string" ? clip.topic : "",

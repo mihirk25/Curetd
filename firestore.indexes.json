@@ -11,6 +11,14 @@
       "density": "SPARSE_ALL"
     },
     {
+      "collectionGroup": "clips",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "videoId", "order": "ASCENDING" },
+        { "fieldPath": "userId", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "conversations",
       "queryScope": "COLLECTION",
       "fields": [

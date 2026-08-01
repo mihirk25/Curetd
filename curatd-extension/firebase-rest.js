@@ -180,7 +180,14 @@
     return { username, displayName };
   }
 
+  /** Missing audioOnly (legacy Curate) counts as video / false. */
+  function clipMatchesAudioOnlyMode(data, audioOnly) {
+    return (data && data.audioOnly === true) === Boolean(audioOnly);
+  }
+
   async function findExistingClip(uid, videoId) {
+    // Do not filter audioOnly in the query — Firestore == false skips docs where
+    // the field is absent, which orphaned legacy curated clips from merges.
     const docs = await runQuery({
       from: [{ collectionId: "clips" }],
       where: {
@@ -196,13 +203,6 @@
             },
             {
               fieldFilter: {
-                field: { fieldPath: "audioOnly" },
-                op: "EQUAL",
-                value: { booleanValue: false },
-              },
-            },
-            {
-              fieldFilter: {
                 field: { fieldPath: "userId" },
                 op: "EQUAL",
                 value: { stringValue: uid },
@@ -211,15 +211,18 @@
           ],
         },
       },
-      limit: 1,
+      limit: 20,
     });
-    if (!docs.length) return null;
-    const doc = docs[0];
-    return {
-      id: docIdFromName(doc.name),
-      data: decodeDocument(doc),
-      raw: doc,
-    };
+    for (const doc of docs) {
+      const data = decodeDocument(doc);
+      if (!clipMatchesAudioOnlyMode(data, false)) continue;
+      return {
+        id: docIdFromName(doc.name),
+        data,
+        raw: doc,
+      };
+    }
+    return null;
   }
 
   function newMomentId() {

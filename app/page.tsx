@@ -21,6 +21,7 @@ import {
   unfollowUser,
 } from "./lib/firestore";
 import { markUserHasAddedClip, shouldPromptExtensionInstall } from "../src/lib/firestore";
+import { clipMatchesAudioOnlyMode } from "../src/lib/clip-merge";
 import { supportsChromeExtensionBrowser } from "./lib/browser";
 import {
   adjustTopicUsage,
@@ -1564,16 +1565,20 @@ export default function CuratdMVP() {
         }
       } else {
         // Multi-clip structure: group by videoId + clip type + userId.
+        // Query without audioOnly equality — missing field (legacy Curate) must
+        // still match video-mode merges; Firestore == false skips absent fields.
         const existingQ = query(
           collection(db, "clips"),
           where("videoId", "==", videoId),
-          where("audioOnly", "==", audioOnly),
           where("userId", "==", user.uid),
-          limit(1),
+          limit(20),
         );
         const existingSnap = await getDocs(existingQ);
-        if (!existingSnap.empty) {
-          const existingId = existingSnap.docs[0].id;
+        const existingDoc = existingSnap.docs.find((d) =>
+          clipMatchesAudioOnlyMode(d.data() as { audioOnly?: unknown }, audioOnly),
+        );
+        if (existingDoc) {
+          const existingId = existingDoc.id;
           await updateDoc(doc(db, "clips", existingId), {
             title,
             channelName: channel,

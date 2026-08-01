@@ -18,6 +18,7 @@ import {
 import { db } from "../../firebase";
 import { extractVideoId } from "../lib/clip-playback";
 import { normalizeTopicName, recordTopicUsage } from "../lib/topic-directory";
+import { clipMatchesAudioOnlyMode } from "../../src/lib/clip-merge";
 
 function newMomentId() {
   return `m_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -171,17 +172,21 @@ export function CollectionAddClipsModal({
         topic: normalizedTopic,
         addedAt: Timestamp.now(),
       };
+      // Omit audioOnly from the query: legacy docs without the field must merge
+      // into video clips (Firestore equality does not match missing fields).
       const existingQ = query(
         collection(db, "clips"),
         where("videoId", "==", videoId),
-        where("audioOnly", "==", false),
         where("userId", "==", currentUser.uid),
-        limit(1),
+        limit(20),
       );
       const existingSnap = await getDocs(existingQ);
+      const existingDoc = existingSnap.docs.find((d) =>
+        clipMatchesAudioOnlyMode(d.data() as { audioOnly?: unknown }, false),
+      );
       let clipId: string;
-      if (!existingSnap.empty) {
-        const existingId = existingSnap.docs[0].id;
+      if (existingDoc) {
+        const existingId = existingDoc.id;
         await updateDoc(doc(db, "clips", existingId), {
           title: clipTitle.trim(),
           channelName: channel.trim() || "Unknown channel",
