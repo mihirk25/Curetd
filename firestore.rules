@@ -1,7 +1,14 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Unique handles: public read; create/delete when the authenticated user matches { uid }.
+    function userPath(userId) {
+      return /databases/$(database)/documents/users/$(userId);
+    }
+
+    // Unique handles: public read; create when uid matches.
+    // Delete only when the owner no longer claims this handle after the write
+    // (rename transaction). Bare delete while users.username still equals {uname}
+    // would orphan the registry and enable reclaim/misattribution.
     match /usernames/{uname} {
       allow read: if true;
       allow create: if request.auth != null
@@ -9,7 +16,12 @@ service cloud.firestore {
         && request.auth.uid == request.resource.data.uid;
       allow update: if false;
       allow delete: if request.auth != null
-        && request.auth.uid == resource.data.uid;
+        && request.auth.uid == resource.data.uid
+        && (
+          !existsAfter(userPath(request.auth.uid))
+          || !getAfter(userPath(request.auth.uid)).data.keys().hasAny(['username'])
+          || getAfter(userPath(request.auth.uid)).data.username != uname
+        );
     }
 
     match /users/{userId} {
