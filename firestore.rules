@@ -1,12 +1,21 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function userPath(userId) {
+      return /databases/$(database)/documents/users/$(userId);
+    }
+
     // Unique handles: public read; create/delete when the authenticated user matches { uid }.
+    // Create only when users/{uid}.username claims this handle after the write
+    // (claim/rename transactions). Bare create without that claim lets any signed-in
+    // user squat arbitrary handles and hijack /[username] profile URLs.
     match /usernames/{uname} {
       allow read: if true;
       allow create: if request.auth != null
         && request.resource.data.keys().hasOnly(['uid'])
-        && request.auth.uid == request.resource.data.uid;
+        && request.auth.uid == request.resource.data.uid
+        && existsAfter(userPath(request.auth.uid))
+        && getAfter(userPath(request.auth.uid)).data.username == uname;
       allow update: if false;
       allow delete: if request.auth != null
         && request.auth.uid == resource.data.uid;
