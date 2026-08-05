@@ -18,6 +18,7 @@ import {
 import { db } from "../../firebase";
 import { extractVideoId } from "../lib/clip-playback";
 import { normalizeTopicName, recordTopicUsage } from "../lib/topic-directory";
+import { hasEmptyMoments, momentsBeforeAppend } from "../../src/lib/clip-moments";
 
 function newMomentId() {
   return `m_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -182,6 +183,12 @@ export function CollectionAddClipsModal({
       let clipId: string;
       if (!existingSnap.empty) {
         const existingId = existingSnap.docs[0].id;
+        const existingData = {
+          id: existingId,
+          ...(existingSnap.docs[0].data() as Record<string, unknown>),
+        };
+        // Preserve top-level legacy range when moments[] is empty (same as homepage).
+        const preserved = momentsBeforeAppend(existingData);
         await updateDoc(doc(db, "clips", existingId), {
           title: clipTitle.trim(),
           channelName: channel.trim() || "Unknown channel",
@@ -189,7 +196,7 @@ export function CollectionAddClipsModal({
           audioOnly: false,
           username: currentUser.username ?? null,
           displayName: currentUser.username || "Anonymous",
-          moments: arrayUnion(moment),
+          moments: hasEmptyMoments(existingData) ? [...preserved, moment] : arrayUnion(moment),
         });
         clipId = existingId;
       } else {
