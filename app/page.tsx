@@ -21,6 +21,7 @@ import {
   unfollowUser,
 } from "./lib/firestore";
 import { markUserHasAddedClip, shouldPromptExtensionInstall } from "../src/lib/firestore";
+import { hasEmptyMoments, momentsBeforeAppend } from "../src/lib/clip-moments";
 import { supportsChromeExtensionBrowser } from "./lib/browser";
 import {
   adjustTopicUsage,
@@ -1574,6 +1575,13 @@ export default function CuratdMVP() {
         const existingSnap = await getDocs(existingQ);
         if (!existingSnap.empty) {
           const existingId = existingSnap.docs[0].id;
+          const existingData = {
+            id: existingId,
+            ...(existingSnap.docs[0].data() as Record<string, unknown>),
+          };
+          // Empty moments[] still displays top-level start/end via getMoments().
+          // arrayUnion alone would hide that legacy range forever.
+          const preserved = momentsBeforeAppend(existingData);
           await updateDoc(doc(db, "clips", existingId), {
             title,
             channelName: channel,
@@ -1581,7 +1589,7 @@ export default function CuratdMVP() {
             audioOnly,
             username: username ?? null,
             displayName: username || "Anonymous",
-            moments: arrayUnion(moment),
+            moments: hasEmptyMoments(existingData) ? [...preserved, moment] : arrayUnion(moment),
           });
         } else {
           await addDoc(collection(db, "clips"), {
@@ -1741,7 +1749,16 @@ export default function CuratdMVP() {
         const next = getMoments(clip).map((m: any) => (String(m?.id) === editingMomentId ? { ...m, ...moment } : m));
         await updateDoc(doc(db, "clips", clip.id), { moments: next });
       } else {
-        await updateDoc(doc(db, "clips", clip.id), { moments: arrayUnion(moment) });
+        // Legacy Curate/DM clips (and delete-last-moment phantoms) store the range
+        // only on top-level fields. arrayUnion alone would create moments=[new]
+        // and hide the original range forever.
+        const existingMoments = Array.isArray(clip?.moments) ? clip.moments : [];
+        if (existingMoments.length === 0) {
+          const preserved = momentsBeforeAppend({ id: clip.id, ...clip });
+          await updateDoc(doc(db, "clips", clip.id), { moments: [...preserved, moment] });
+        } else {
+          await updateDoc(doc(db, "clips", clip.id), { moments: arrayUnion(moment) });
+        }
       }
 
       setInlineAddForClipId(null);
@@ -1757,6 +1774,12 @@ export default function CuratdMVP() {
   const deleteMoment = async (clip: any, momentId: string) => {
     if (!user || user.uid !== clip.userId) return;
     const next = getMoments(clip).filter((m: any) => String(m?.id) !== momentId);
+    // Writing moments:[] leaves top-level start/end intact, so getMoments() still
+    // shows the deleted range; a later merge then permanently drops it.
+    if (next.length === 0) {
+      alert("This is the only moment. Delete the whole clip instead.");
+      return;
+    }
     try {
       await updateDoc(doc(db, "clips", clip.id), { moments: next });
       if (playingMoment?.clipId === clip.id && playingMoment?.momentId === momentId) {

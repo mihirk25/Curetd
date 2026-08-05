@@ -229,6 +229,34 @@
     return `m_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
   }
 
+  /** Mirror src/lib/clip-moments.ts — keep in sync. */
+  function legacyMomentFromTopLevel(data, clipId) {
+    if (!data) return null;
+    const startRaw = data.startTime;
+    const endRaw = data.endTime;
+    const startTime = typeof startRaw === "number" ? startRaw : Number(startRaw);
+    const endTime = typeof endRaw === "number" ? endRaw : Number(endRaw);
+    if (!Number.isFinite(startTime) && !Number.isFinite(endTime)) return null;
+    const st = Number.isFinite(startTime) ? startTime : 0;
+    const et = Number.isFinite(endTime) ? endTime : st;
+    return {
+      id: clipId ? `${clipId}_legacy` : "legacy",
+      startTime: st,
+      endTime: et,
+      note: typeof data.note === "string" ? data.note : "",
+      topic: typeof data.topic === "string" ? data.topic : "",
+      addedAt: data.createdAt ?? null,
+    };
+  }
+
+  function momentsBeforeAppend(data, clipId) {
+    if (Array.isArray(data?.moments) && data.moments.length > 0) {
+      return [...data.moments];
+    }
+    const legacy = legacyMomentFromTopLevel(data, clipId);
+    return legacy ? [legacy] : [];
+  }
+
   function buildFieldsObject(data) {
     const fields = {};
     for (const [k, v] of Object.entries(data)) {
@@ -288,7 +316,9 @@
     const existing = await findExistingClip(session.uid, videoId);
 
     if (existing) {
-      const moments = Array.isArray(existing.data.moments) ? [...existing.data.moments] : [];
+      // Empty moments[] still displays top-level start/end in the web UI.
+      // Pushing only the new moment would hide that range forever.
+      const moments = momentsBeforeAppend(existing.data, existing.id);
       moments.push(moment);
       await patchClip(existing.id, {
         title: videoTitle,
