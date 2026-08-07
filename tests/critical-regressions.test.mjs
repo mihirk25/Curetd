@@ -89,7 +89,13 @@ function testEnsureTwoPartyDmWired() {
   );
 
   assert.match(newMessageSource, /ensureTwoPartyDm/);
+  assert.match(newMessageSource, /isExactDmPair/);
   assert.doesNotMatch(newMessageSource, /addDoc\(collection\(db, "conversations"\)/);
+  // Must not reopen a third-party squat via loose "both uids present" matching.
+  assert.doesNotMatch(
+    newMessageSource,
+    /parts\.includes\(currentUserId\) && parts\.includes\(otherUid\)/,
+  );
 }
 
 testDmCreateBindsDocIdToExactPair();

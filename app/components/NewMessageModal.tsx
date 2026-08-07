@@ -12,7 +12,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import { createGroupConversation } from "../lib/firestore";
-import { ensureTwoPartyDm } from "../messages/messaging";
+import { ensureTwoPartyDm, isExactDmPair } from "../messages/messaging";
 
 type UsernameHit = { uid: string; username: string };
 
@@ -108,12 +108,15 @@ export function NewMessageModal(props: {
     };
   }, [open, qText, currentUserId]);
 
+  // Only reuse an existing thread when it is exactly the two-party DM.
+  // A broader "both uids present" check would reopen a pre-squatted slot that
+  // silently includes a third participant (see ensureTwoPartyDm).
   const dmExistingConversationId = (otherUid: string) => {
+    if (!currentUserId) return null;
     for (const c of conversations || []) {
       const data: any = c.data as any;
       if (Boolean(data?.isGroup)) continue;
-      const parts = Array.isArray(data?.participants) ? data.participants : [];
-      if (parts.includes(currentUserId) && parts.includes(otherUid)) return c.id;
+      if (isExactDmPair(data?.participants, currentUserId, otherUid)) return c.id;
     }
     return null;
   };
