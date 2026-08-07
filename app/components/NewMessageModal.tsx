@@ -2,18 +2,17 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  addDoc,
   collection,
   documentId,
   getDocs,
   orderBy,
   query,
-  serverTimestamp,
   where,
   limit,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import { createGroupConversation } from "../lib/firestore";
+import { ensureTwoPartyDm } from "../messages/messaging";
 
 type UsernameHit = { uid: string; username: string };
 
@@ -244,17 +243,15 @@ export function NewMessageModal(props: {
                     }
 
                     try {
-                      const ref = await addDoc(collection(db, "conversations"), {
-                        participants: [currentUserId, u.uid],
-                        isGroup: false,
-                        lastMessage: "",
-                        lastMessageAt: serverTimestamp(),
-                        unreadBy: { [currentUserId]: 0, [u.uid]: 0 },
+                      const { conversationId } = await ensureTwoPartyDm({
+                        db,
+                        currentUid: currentUserId,
+                        peerUid: u.uid,
                       });
-                      onOpenConversation(ref.id);
+                      onOpenConversation(conversationId);
                       onClose();
                     } catch {
-                      // ignore for now
+                      alert("Could not open a private chat. Please try again.");
                     }
                   }}
                   className={`w-full text-left rounded-2xl px-3 py-3 border transition-colors ${

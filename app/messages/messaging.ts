@@ -1,8 +1,11 @@
 import {
   collection,
+  deleteDoc,
   doc,
+  getDoc,
   increment,
   serverTimestamp,
+  setDoc,
   writeBatch,
   type Firestore,
   type FieldValue,
@@ -13,6 +16,7 @@ export type ConversationDoc = {
   lastMessage?: string;
   lastMessageAt?: any;
   unreadBy?: Record<string, number | FieldValue>;
+  isGroup?: boolean;
 };
 
 export type MessageDoc = {
@@ -25,6 +29,62 @@ export type MessageDoc = {
 export function getConversationId(a: string, b: string) {
   const [x, y] = [a, b].sort();
   return `${x}_${y}`;
+}
+
+/** True when participants is exactly the two DM uids (order-independent). */
+export function isExactDmPair(participants: unknown, a: string, b: string): boolean {
+  if (!Array.isArray(participants) || participants.length !== 2) return false;
+  if (!a || !b || a === b) return false;
+  const set = new Set(
+    participants.filter((p): p is string => typeof p === "string" && p.length > 0),
+  );
+  return set.size === 2 && set.has(a) && set.has(b);
+}
+
+/**
+ * Open or create the deterministic 1:1 DM for (currentUid, peerUid).
+ * If the sorted-id slot was pre-created with the wrong participant set
+ * (silent third-party squat), delete the compromised doc when allowed and recreate.
+ */
+export async function ensureTwoPartyDm(args: {
+  db: Firestore;
+  currentUid: string;
+  peerUid: string;
+}): Promise<{ conversationId: string }> {
+  const { db: firestore, currentUid, peerUid } = args;
+  if (!currentUid || !peerUid || currentUid === peerUid) {
+    throw new Error("INVALID_DM_PAIR");
+  }
+
+  const conversationId = getConversationId(currentUid, peerUid);
+  const convRef = doc(firestore, "conversations", conversationId);
+  const existing = await getDoc(convRef);
+
+  if (existing.exists()) {
+    const data = existing.data() as ConversationDoc;
+    if (data?.isGroup === true) {
+      throw new Error("DM_SLOT_IS_GROUP");
+    }
+    if (isExactDmPair(data?.participants, currentUid, peerUid)) {
+      return { conversationId };
+    }
+    const parts = Array.isArray(data?.participants) ? data.participants : [];
+    // Only a listed participant can delete under hardened rules.
+    if (!parts.includes(currentUid)) {
+      throw new Error("DM_SLOT_COMPROMISED");
+    }
+    await deleteDoc(convRef);
+  }
+
+  await setDoc(convRef, {
+    participants: [currentUid, peerUid],
+    isGroup: false,
+    lastMessage: "",
+    lastMessageAt: serverTimestamp(),
+    unreadBy: { [currentUid]: 0, [peerUid]: 0 },
+  } satisfies ConversationDoc);
+
+  return { conversationId };
 }
 
 export async function sendMessage(args: {
