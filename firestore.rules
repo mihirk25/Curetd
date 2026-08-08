@@ -1,6 +1,14 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
     // Unique handles: public read; create/delete when the authenticated user matches { uid }.
     match /usernames/{uname} {
       allow read: if true;
@@ -26,10 +34,29 @@ service cloud.firestore {
         && resource.data.userId == request.auth.uid;
     }
 
-    // Clip subcollections (likes, comments, …). Emoji reactions path removed from UI — block writes under reactions/*.
-    match /clips/{clipId}/{document=**} {
+    // Likes are keyed by the liking user's uid — only that user may write their like doc.
+    match /clips/{clipId}/likes/{userId} {
       allow read: if true;
-      allow write: if request.auth != null && !document.matches("reactions/.*");
+      allow create, update, delete: if isOwner(userId);
+    }
+
+    // Comments: author must match auth on create; userId is sticky on update so an
+    // author cannot reattribute (forge) the comment onto another account.
+    match /clips/{clipId}/comments/{commentId} {
+      allow read: if true;
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if signedIn()
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // Deny other clip subcollections (including legacy reactions/*).
+    match /clips/{clipId}/{document=**} {
+      allow read: if false;
+      allow write: if false;
     }
 
     match /savedClips/{id} {
