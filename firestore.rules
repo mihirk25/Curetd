@@ -36,8 +36,26 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    // Follow edges are owned by followerId. Updates must keep both endpoints
+    // sticky — otherwise any signed-in user can overwrite another user's
+    // follow doc by setting followerId to themselves (data loss). Doc id is
+    // bound to `${followerId}_${followingId}` so duplicate edges cannot inflate counts.
     match /follows/{id} {
-      allow read, write: if request.auth != null;
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasAll(['followerId', 'followingId'])
+        && request.resource.data.followerId == request.auth.uid
+        && request.resource.data.followingId is string
+        && request.resource.data.followingId.size() > 0
+        && request.resource.data.followerId != request.resource.data.followingId
+        && id == request.resource.data.followerId + '_' + request.resource.data.followingId;
+      allow update: if request.auth != null
+        && resource.data.followerId == request.auth.uid
+        && request.resource.data.followerId == resource.data.followerId
+        && request.resource.data.followingId == resource.data.followingId
+        && id == resource.data.followerId + '_' + resource.data.followingId;
+      allow delete: if request.auth != null
+        && resource.data.followerId == request.auth.uid;
     }
 
     match /conversations/{id} {
