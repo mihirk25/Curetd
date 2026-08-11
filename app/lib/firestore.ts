@@ -140,7 +140,8 @@ export function subscribeToMessages(
 export async function createGroupConversation(creatorId: string, participantIds: string[], groupName: string) {
   if (!creatorId) throw new Error("Missing creatorId");
 
-  const { addDoc, collection: fsCollection, serverTimestamp: fsServerTimestamp } = await import("firebase/firestore");
+  const { collection: fsCollection, doc: fsDoc, serverTimestamp: fsServerTimestamp, setDoc: fsSetDoc } =
+    await import("firebase/firestore");
 
   const participants = Array.from(
     new Set([creatorId, ...(Array.isArray(participantIds) ? participantIds : [])].filter(Boolean)),
@@ -149,7 +150,12 @@ export async function createGroupConversation(creatorId: string, participantIds:
   const unreadBy: Record<string, number> = {};
   for (const uid of participants) unreadBy[uid] = 0;
 
-  const ref = await addDoc(fsCollection(db, "conversations"), {
+  // Prefix group ids so they cannot occupy deterministic DM slots (`uidA_uidB`).
+  // After conversation create ACL binds DM ids (#60), an unbound group create
+  // could otherwise pre-create that slot as isGroup:true and DoS the DM.
+  const autoId = fsDoc(fsCollection(db, "conversations")).id;
+  const conversationId = `group_${autoId}`;
+  await fsSetDoc(fsDoc(db, "conversations", conversationId), {
     participants,
     isGroup: true,
     groupName: String(groupName ?? ""),
@@ -159,5 +165,5 @@ export async function createGroupConversation(creatorId: string, participantIds:
     unreadBy,
   });
 
-  return ref.id;
+  return conversationId;
 }

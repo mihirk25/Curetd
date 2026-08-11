@@ -85,15 +85,48 @@ export default function CollectionDetailPage() {
         return;
       }
       try {
-        const q = query(
-          collection(db, "collections"),
-          where("username", "==", username),
-          where("slug", "==", slug),
-          limit(1),
-        );
-        const snap = await getDocs(q);
+        // Resolve handle → uid so URL ownership cannot be spoofed via a forged
+        // denormalized `username` field on someone else's collection doc.
+        const handleSnap = await getDoc(doc(db, "usernames", username));
+        const ownerUid =
+          handleSnap.exists() && typeof (handleSnap.data() as { uid?: unknown })?.uid === "string"
+            ? String((handleSnap.data() as { uid: string }).uid)
+            : "";
+
+        let snap =
+          ownerUid
+            ? await getDocs(
+                query(
+                  collection(db, "collections"),
+                  where("userId", "==", ownerUid),
+                  where("slug", "==", slug),
+                  limit(1),
+                ),
+              )
+            : null;
+
+        // Legacy share links keyed only by denormalized username: accept only when
+        // the doc's userId matches the handle owner (or the handle is unclaimed).
+        // Never surface another user's collection under this profile URL.
+        if (!snap || snap.empty) {
+          const legacy = await getDocs(
+            query(
+              collection(db, "collections"),
+              where("username", "==", username),
+              where("slug", "==", slug),
+              limit(1),
+            ),
+          );
+          if (!legacy.empty) {
+            const legacyUid = String((legacy.docs[0].data() as { userId?: unknown })?.userId || "");
+            if (!ownerUid || legacyUid === ownerUid) {
+              snap = legacy;
+            }
+          }
+        }
+
         if (cancelled) return;
-        if (snap.empty) {
+        if (!snap || snap.empty) {
           setNotFound(true);
           setLoading(false);
           return;
