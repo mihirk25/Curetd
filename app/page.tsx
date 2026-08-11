@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { db } from "../firebase";
-import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, serverTimestamp, query, orderBy, onSnapshot, setDoc, where, limit, arrayUnion, Timestamp, increment } from "firebase/firestore";
+import { collection, addDoc, updateDoc, deleteDoc, doc, getDoc, getDocs, serverTimestamp, query, orderBy, onSnapshot, setDoc, where, limit, arrayUnion, Timestamp, increment, runTransaction } from "firebase/firestore";
 import { useAuth } from "./auth-context";
 import { UsernameSetup } from "./username-setup";
 import { CuratorSearchBar } from "./curator-search-bar";
@@ -1537,26 +1537,48 @@ export default function CuratdMVP() {
       };
 
       // If editing, update the first moment (legacy UI behavior).
+      // Use a transaction so a concurrent moment append (extension / other tab)
+      // between read and write cannot be clobbered by rewriting the full array.
       if (editingClipId) {
-        const snap = await getDoc(doc(db, "clips", editingClipId));
-        const data = snap.exists() ? (snap.data() as any) : null;
-        const previousMoments = Array.isArray(data?.moments) ? data.moments : [];
-        const previousTopic =
-          typeof previousMoments[0]?.topic === "string" ? normalizeTopicName(previousMoments[0].topic) : "";
-        const moments = Array.isArray(data?.moments) ? [...data.moments] : [];
-        if (moments.length === 0) moments.push(moment);
-        else moments[0] = { ...moments[0], startTime: totalStart, endTime: totalEnd, note, topic: normalizedTopic };
-        await updateDoc(doc(db, "clips", editingClipId), {
-          videoUrl: url,
-          videoId,
-          audioOnly,
-          title,
-          channelName: channel,
-          userId: user.uid,
-          username: username ?? null,
-          displayName: username || "Anonymous",
-          createdAt: data?.createdAt ?? serverTimestamp(),
-          moments,
+        const clipRef = doc(db, "clips", editingClipId);
+        const previousTopic = await runTransaction(db, async (tx) => {
+          const snap = await tx.get(clipRef);
+          if (!snap.exists()) throw new Error("clip missing");
+          const data = snap.data() as {
+            userId?: string;
+            moments?: unknown;
+            createdAt?: unknown;
+          };
+          if (data.userId !== user.uid) throw new Error("not owner");
+          const previousMoments = Array.isArray(data.moments) ? data.moments : [];
+          const prevTopic =
+            typeof previousMoments[0]?.topic === "string"
+              ? normalizeTopicName(previousMoments[0].topic)
+              : "";
+          const moments = Array.isArray(data.moments) ? [...data.moments] : [];
+          if (moments.length === 0) moments.push(moment);
+          else {
+            moments[0] = {
+              ...moments[0],
+              startTime: totalStart,
+              endTime: totalEnd,
+              note,
+              topic: normalizedTopic,
+            };
+          }
+          tx.update(clipRef, {
+            videoUrl: url,
+            videoId,
+            audioOnly,
+            title,
+            channelName: channel,
+            userId: user.uid,
+            username: username ?? null,
+            displayName: username || "Anonymous",
+            createdAt: data.createdAt ?? serverTimestamp(),
+            moments,
+          });
+          return prevTopic;
         });
         if (previousTopic && previousTopic !== normalizedTopic) {
           await adjustTopicUsage(previousTopic, -1, user.uid);
