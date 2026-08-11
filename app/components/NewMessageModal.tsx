@@ -2,18 +2,17 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  addDoc,
   collection,
   documentId,
   getDocs,
   orderBy,
   query,
-  serverTimestamp,
   where,
   limit,
 } from "firebase/firestore";
 import { db } from "../../firebase";
 import { createGroupConversation } from "../lib/firestore";
+import { ensureTwoPartyDm, isExactDmPair } from "../messages/messaging";
 
 type UsernameHit = { uid: string; username: string };
 
@@ -109,12 +108,15 @@ export function NewMessageModal(props: {
     };
   }, [open, qText, currentUserId]);
 
+  // Only reuse an existing thread when it is exactly the two-party DM.
+  // A broader "both uids present" check would reopen a pre-squatted slot that
+  // silently includes a third participant (see ensureTwoPartyDm).
   const dmExistingConversationId = (otherUid: string) => {
+    if (!currentUserId) return null;
     for (const c of conversations || []) {
       const data: any = c.data as any;
       if (Boolean(data?.isGroup)) continue;
-      const parts = Array.isArray(data?.participants) ? data.participants : [];
-      if (parts.includes(currentUserId) && parts.includes(otherUid)) return c.id;
+      if (isExactDmPair(data?.participants, currentUserId, otherUid)) return c.id;
     }
     return null;
   };
@@ -244,17 +246,15 @@ export function NewMessageModal(props: {
                     }
 
                     try {
-                      const ref = await addDoc(collection(db, "conversations"), {
-                        participants: [currentUserId, u.uid],
-                        isGroup: false,
-                        lastMessage: "",
-                        lastMessageAt: serverTimestamp(),
-                        unreadBy: { [currentUserId]: 0, [u.uid]: 0 },
+                      const { conversationId } = await ensureTwoPartyDm({
+                        db,
+                        currentUid: currentUserId,
+                        peerUid: u.uid,
                       });
-                      onOpenConversation(ref.id);
+                      onOpenConversation(conversationId);
                       onClose();
                     } catch {
-                      // ignore for now
+                      alert("Could not open a private chat. Please try again.");
                     }
                   }}
                   className={`w-full text-left rounded-2xl px-3 py-3 border transition-colors ${

@@ -16,7 +16,6 @@ import {
   orderBy,
   query,
   serverTimestamp,
-  setDoc,
   updateDoc,
   where,
   limit,
@@ -29,7 +28,7 @@ import { CuratorSearchBar } from "../curator-search-bar";
 import { SignInCuratorModal } from "../sign-in-curator-modal";
 import { CuratorRequiredModal } from "../curator-required-modal";
 import { useUnreadMessageCount } from "../messages/use-unread-count";
-import { getConversationId } from "../messages/messaging";
+import { ensureTwoPartyDm } from "../messages/messaging";
 import {
   followUser,
   getFollowerCount,
@@ -704,21 +703,17 @@ export default function PublicProfilePage() {
                               setShowAuthModal(true);
                               return;
                             }
-                            const convId = getConversationId(user.uid, profile.uid);
                             void (async () => {
                               try {
-                                await setDoc(
-                                  doc(db, "conversations", convId),
-                                  {
-                                    participants: [user.uid, profile.uid],
-                                    unreadBy: { [user.uid]: 0, [profile.uid]: 0 },
-                                    lastMessage: "",
-                                    lastMessageAt: serverTimestamp(),
-                                  },
-                                  { merge: true },
-                                );
-                              } catch {}
-                              router.push(`/messages?c=${encodeURIComponent(convId)}`);
+                                const { conversationId } = await ensureTwoPartyDm({
+                                  db,
+                                  currentUid: user.uid,
+                                  peerUid: profile.uid,
+                                });
+                                router.push(`/messages?c=${encodeURIComponent(conversationId)}`);
+                              } catch {
+                                alert("Could not open a private chat with this curator. Please try again.");
+                              }
                             })();
                           }}
                           className="text-sm font-semibold px-4 py-2 rounded-full border border-zinc-700 text-zinc-200 hover:bg-zinc-800/60 transition-colors"

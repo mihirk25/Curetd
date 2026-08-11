@@ -21,7 +21,7 @@ import { db } from "../../firebase";
 import { useAuth } from "../auth-context";
 import { SignInCuratorModal } from "../sign-in-curator-modal";
 import { CuratorRequiredModal } from "../curator-required-modal";
-import { getConversationId, markConversationRead, sendMessage, type ConversationDoc } from "./messaging";
+import { markConversationRead, sendMessage, type ConversationDoc } from "./messaging";
 import { sendMessage as sendMessageViaFirestoreUtil, subscribeToMessages } from "../lib/firestore";
 import { NewMessageModal } from "../components/NewMessageModal";
 import { Navbar } from "../components/Navbar";
