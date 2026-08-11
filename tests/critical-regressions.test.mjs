@@ -67,9 +67,43 @@ function testCollectionLookupRejectsUsernameSpoof() {
   assert.match(col, /request\.resource\.data\.userId == resource\.data\.userId/);
 }
 
+function repostsBlock() {
+  const match = rulesSource.match(/match \/reposts\/\{id\} \{([\s\S]*?)\n    \}/);
+  assert.ok(match, "expected reposts rule block");
+  return match[1];
+}
+
+function testRepostAuthorshipIsSticky() {
+  const block = repostsBlock();
+  assert.match(block, /request\.resource\.data\.repostedByUid == request\.auth\.uid/);
+  assert.match(
+    block,
+    /id == request\.resource\.data\.originalClipId \+ '_' \+ request\.auth\.uid/,
+  );
+  // Survives #50's after-only ownership: update must keep repostedByUid sticky.
+  assert.match(
+    block,
+    /request\.resource\.data\.repostedByUid == resource\.data\.repostedByUid/,
+  );
+  assert.match(
+    block,
+    /request\.resource\.data\.originalClipId == resource\.data\.originalClipId/,
+  );
+  assert.match(block, /resource\.data\.repostedByUid == request\.auth\.uid/);
+
+  // Clients use deterministic ids and profile lists by repostedByUid.
+  const page = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const button = readFileSync(new URL("../app/clip/[id]/repost-button.tsx", import.meta.url), "utf8");
+  const profile = readFileSync(new URL("../app/[username]/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /\$\{clipId\}_\$\{user\.uid\}/);
+  assert.match(button, /\$\{clipId\}_\$\{user\.uid\}/);
+  assert.match(profile, /where\("repostedByUid",\s*"==",\s*uid\)/);
+}
+
 testGroupCreatesCannotOccupyDmSlots();
 testEnsureTwoPartyDmRecoversGroupSquat();
 testEditClipUsesTransactionForMoments();
 testCollectionLookupRejectsUsernameSpoof();
+testRepostAuthorshipIsSticky();
 
 console.log("critical regressions passed");
