@@ -32,8 +32,23 @@ service cloud.firestore {
       allow write: if request.auth != null && !document.matches("reactions/.*");
     }
 
+    // Saved bookmarks: owner-scoped. Sticky userId/clipId and deterministic
+    // id (`{userId}_{clipId}`) so an owner cannot reassign a save onto another
+    // account (same sticky-authorship class as comments/follows/reposts).
     match /savedClips/{id} {
-      allow read, write: if request.auth != null;
+      allow read: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.clipId is string
+        && request.resource.data.clipId.size() > 0
+        && id == request.resource.data.userId + '_' + request.resource.data.clipId;
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.clipId == resource.data.clipId;
+      allow delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
     }
 
     match /follows/{id} {

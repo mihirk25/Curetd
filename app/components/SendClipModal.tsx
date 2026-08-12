@@ -6,6 +6,7 @@ import { db } from "../../firebase";
 import { sendMessage } from "../lib/firestore";
 
 type ClipPayload = {
+  clipId?: string;
   title?: string;
   videoId?: string;
   startTime?: number;

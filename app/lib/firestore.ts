@@ -54,7 +54,7 @@ export async function sendMessage(
   messageData: {
     text?: string;
     type: "text" | "clip" | "youtube";
-    clip?: { title?: string; videoId?: string; startTime?: number; endTime?: number; topic?: string; channel?: string };
+    clip?: { clipId?: string; title?: string; videoId?: string; startTime?: number; endTime?: number; topic?: string; channel?: string };
     youtubeUrl?: string;
   },
 ) {

@@ -14,6 +14,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where,
 } from "firebase/firestore";
@@ -364,7 +365,7 @@ export function MessagesClient() {
       createdAt: any;
       read?: boolean;
       type?: "text" | "clip" | "youtube";
-      clip?: { title?: string; videoId?: string; startTime?: number; endTime?: number; topic?: string; channel?: string };
+      clip?: { clipId?: string; title?: string; videoId?: string; startTime?: number; endTime?: number; topic?: string; channel?: string };
       youtubeUrl?: string;
     }>
   >([]);
@@ -979,10 +980,12 @@ export function MessagesClient() {
                     const isAudioOnly = typeof clip?.topic === "string" && clip.topic === "audio-only";
                     const meta = clipVideoId ? oembedByVideoId[clipVideoId] : undefined;
                     const savedKey =
-                      user && type === "clip" && clipVideoId && typeof clip?.startTime === "number"
-                        ? `${user.uid}|${clipVideoId}|${Math.floor(clip.startTime)}`
+                      user && type === "clip" && typeof clip?.clipId === "string" && clip.clipId.trim()
+                        ? `${user.uid}_${clip.clipId.trim()}`
                         : null;
-                    const isSaved = savedKey ? savedClipKeyRef.current.has(savedKey) : false;
+                    const isSaved =
+                      Boolean(clipSavedToastByMessageId[m.id]) ||
+                      (savedKey ? savedClipKeyRef.current.has(savedKey) : false);
 
                     return (
                       <div
@@ -1168,23 +1171,62 @@ export function MessagesClient() {
                                         onClick={async () => {
                                           if (!user) return;
                                           const vid = typeof clip?.videoId === "string" ? clip.videoId : "";
-                                          const st = typeof clip?.startTime === "number" ? clip.startTime : null;
-                                          if (!vid || st == null) return;
-                                          const key = `${user.uid}|${vid}|${Math.floor(st)}`;
-                                          if (savedClipKeyRef.current.has(key)) return;
+                                          if (!vid) return;
 
                                           try {
-                                            // Check existing saved clip
-                                            const qSaved = query(
-                                              collection(db, "savedClips"),
-                                              where("userId", "==", user.uid),
-                                              where("videoId", "==", vid),
-                                              where("startTime", "==", Math.floor(st)),
-                                              limit(1),
-                                            );
-                                            const existing = await getDocs(qSaved);
-                                            if (!existing.empty) {
-                                              savedClipKeyRef.current.add(key);
+                                            let clipId =
+                                              typeof clip?.clipId === "string" && clip.clipId.trim()
+                                                ? clip.clipId.trim()
+                                                : "";
+
+                                            // Shared YouTube-link clips may omit clipId — resolve a
+                                            // public clip doc so Saved matches the homepage schema.
+                                            if (!clipId) {
+                                              const clipsSnap = await getDocs(
+                                                query(collection(db, "clips"), where("videoId", "==", vid), limit(8)),
+                                              );
+                                              const st =
+                                                typeof clip?.startTime === "number" ? Math.floor(clip.startTime) : null;
+                                              let matched: string | null = null;
+                                              for (const d of clipsSnap.docs) {
+                                                const data = d.data() as {
+                                                  startTime?: unknown;
+                                                  moments?: Array<{ startTime?: unknown }>;
+                                                };
+                                                if (st == null) {
+                                                  matched = d.id;
+                                                  break;
+                                                }
+                                                const top =
+                                                  typeof data.startTime === "number" ? Math.floor(data.startTime) : null;
+                                                if (top === st) {
+                                                  matched = d.id;
+                                                  break;
+                                                }
+                                                const moments = Array.isArray(data.moments) ? data.moments : [];
+                                                if (
+                                                  moments.some(
+                                                    (m) =>
+                                                      typeof m?.startTime === "number" && Math.floor(m.startTime) === st,
+                                                  )
+                                                ) {
+                                                  matched = d.id;
+                                                  break;
+                                                }
+                                              }
+                                              if (!matched && !clipsSnap.empty) matched = clipsSnap.docs[0].id;
+                                              clipId = matched || "";
+                                            }
+
+                                            if (!clipId) {
+                                              // No Curatd clip exists for this video — Curate creates one.
+                                              return;
+                                            }
+
+                                            const savedDocId = `${user.uid}_${clipId}`;
+                                            const existing = await getDoc(doc(db, "savedClips", savedDocId));
+                                            if (existing.exists()) {
+                                              savedClipKeyRef.current.add(savedDocId);
                                               setClipSavedToastByMessageId((prev) => ({ ...prev, [m.id]: true }));
                                               window.setTimeout(
                                                 () => setClipSavedToastByMessageId((prev) => ({ ...prev, [m.id]: false })),
@@ -1193,27 +1235,12 @@ export function MessagesClient() {
                                               return;
                                             }
 
-                                            let resolvedTitle = typeof clip?.title === "string" ? clip.title : "";
-                                            let resolvedChannel = typeof clip?.channel === "string" ? clip.channel : "";
-                                            if (resolvedTitle.trim().toLowerCase().startsWith("http") || !resolvedTitle.trim() || !resolvedChannel.trim()) {
-                                              const o = await fetchYouTubeOembed(vid);
-                                              if (o) {
-                                                if (o.title && o.title.trim()) resolvedTitle = o.title;
-                                                if (o.author_name && o.author_name.trim()) resolvedChannel = o.author_name;
-                                              }
-                                            }
-
-                                            await addDoc(collection(db, "savedClips"), {
+                                            await setDoc(doc(db, "savedClips", savedDocId), {
                                               userId: user.uid,
-                                              videoId: vid,
-                                              startTime: Math.floor(Number(clip?.startTime || 0)),
-                                              endTime: Math.floor(Number(clip?.endTime || 0)),
-                                              topic: typeof clip?.topic === "string" ? clip.topic : "",
-                                              channel: resolvedChannel,
-                                              title: resolvedTitle,
+                                              clipId,
                                               savedAt: serverTimestamp(),
                                             });
-                                            savedClipKeyRef.current.add(key);
+                                            savedClipKeyRef.current.add(savedDocId);
                                             setClipSavedToastByMessageId((prev) => ({ ...prev, [m.id]: true }));
                                             window.setTimeout(
                                               () => setClipSavedToastByMessageId((prev) => ({ ...prev, [m.id]: false })),
