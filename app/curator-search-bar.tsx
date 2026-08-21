@@ -6,6 +6,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { collection, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "./auth-context";
+import { extractVideoId } from "./lib/clip-playback";
 
 export type CuratorSearchHit = {
   id: string;
@@ -24,21 +25,6 @@ type ClipSearchHit = {
   videoId?: string | null;
   startTime?: number | null;
 };
-
-function extractVideoId(url: string) {
-  if (!url) return null;
-  const patterns = [
-    /(?:youtube\.com\/watch\?v=)([a-zA-Z0-9_-]{11})/,
-    /(?:youtu\.be\/)([a-zA-Z0-9_-]{11})/,
-    /(?:youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
-    /(?:youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
-  ];
-  for (const p of patterns) {
-    const m = url.match(p);
-    if (m) return m[1];
-  }
-  return null;
-}
 
 export function CuratorSearchBar() {
   const router = useRouter();
