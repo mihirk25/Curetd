@@ -32,6 +32,7 @@ import {
   type TopicRecord,
 } from "./lib/topic-directory";
 import {
+  extractVideoId,
   onYoutubeThumbnailError,
   onYoutubeThumbnailLoad,
   youtubeThumbnailImgProps,
@@ -604,21 +605,6 @@ function AudioOnlyPlayerCard({
       </div>
     </div>
   );
-}
-
-function extractVideoId(url: string) {
-  if (!url) return null;
-  const patterns = [
-    /(?:youtube\.com\/watch\?v=)([a-zA-Z0-9_-]{11})/,
-    /(?:youtu\.be\/)([a-zA-Z0-9_-]{11})/,
-    /(?:youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
-    /(?:youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
-  ];
-  for (const p of patterns) {
-    const m = url.match(p);
-    if (m) return m[1];
-  }
-  return null;
 }
 
 function parseYoutubeTimestampSeconds(tRaw: string): number | null {
@@ -1520,6 +1506,7 @@ export default function CuratdMVP() {
     const totalEnd =
       (parseInt(endHr, 10) || 0) * 3600 + (parseInt(endMin, 10) || 0) * 60 + (parseInt(endSec, 10) || 0);
     const videoId = extractVideoId(url);
+    if (!videoId) return alert("Could not read a YouTube video ID from that URL.");
 
     setLoading(true);
     try {
